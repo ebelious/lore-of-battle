@@ -1211,6 +1211,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     try{
       var s=onlineSyncRef.current;
       var evSer=s.activeEvent?{id:s.activeEvent.id,name:s.activeEvent.name,desc:s.activeEvent.desc,lore:s.activeEvent.lore,color:s.activeEvent.color,cycles:s.activeEvent.cycles}:null;
+      var gSer={};Object.keys(s.groundItems).forEach(function(k){gSer[k]=(s.groundItems[k]||[]).map(function(it){return {name:it.name,desc:it.desc,flavor:it.flavor,color:it.color,legendaryAbility:it.legendaryAbility||null};});});
       conn.send({type:"STATE",state:{
         board:s.board,tileEffects:s.tileEffects,
         p1Life:s.p1Life,p2Life:s.p2Life,
@@ -1219,7 +1220,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         p1Unlocked:[...s.p1Unlocked],p2Unlocked:[...s.p2Unlocked],
         p1Hand:s.p1Hand,p2Hand:s.p2Hand,
         phase:s.phase,cycleNum:s.cycleNum,
-        groundItems:s.groundItems,winner:s.winner,
+        groundItems:gSer,winner:s.winner,
         eventCyclesLeft:s.eventCyclesLeft,
         activeEvent:evSer,
       }});
@@ -1248,7 +1249,9 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         setPhase(function(prev){return s.phase==="event"?prev:s.phase;});
         if(s.phase!=="event"){phaseRef.current=s.phase;}
         setCycleNum(s.cycleNum);cycleRef.current=s.cycleNum;
-        setGroundItems(s.groundItems||{});
+        var allLoot=[...LOOT_COMMON,...LOOT_ELITE];
+        var giRestored={};Object.keys(s.groundItems||{}).forEach(function(k){giRestored[k]=(s.groundItems[k]||[]).map(function(it){var tmpl=allLoot.find(function(l){return l.name===it.name;})||{apply:function(u){return u;}};return {...it,apply:tmpl.apply};});});
+        setGroundItems(giRestored);
         if(s.winner)setWinner(s.winner);
         setEventCyclesLeft(s.eventCyclesLeft||0);
         if(s.activeEvent!=null){setActiveEvent(s.activeEvent);activeEventRef.current=s.activeEvent;}
