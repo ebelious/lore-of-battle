@@ -1245,7 +1245,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         setP1MaxPts(s.p1MaxPts);setP2MaxPts(s.p2MaxPts);
         setP1Unlocked(new Set(s.p1Unlocked));setP2Unlocked(new Set(s.p2Unlocked));
         setP1Hand(s.p1Hand||[]);setP2Hand(s.p2Hand||[]);
-        setPhase(s.phase);phaseRef.current=s.phase;
+        setPhase(function(prev){return s.phase==="event"?prev:s.phase;});
+        if(s.phase!=="event"){phaseRef.current=s.phase;}
         setCycleNum(s.cycleNum);cycleRef.current=s.cycleNum;
         setGroundItems(s.groundItems||{});
         if(s.winner)setWinner(s.winner);
@@ -1533,8 +1534,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             n[atr][atc][di]={...def,hp:def.hp-dmg};
             if (n[atr][atc][di].hp<=0){
               if (def.typeId!==0){
-                if(def.owner==="p1")setTimeout(function(){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});},0);
-                else setTimeout(function(){setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});},0);
+                if(def.owner==="p1")setTimeout(function(){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});addLog("♛ P1 loses 1 HP — unit lost to neutral attack!","debuff");},0);
+                else setTimeout(function(){setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});addLog("♛ P2 loses 1 HP — unit lost to neutral attack!","debuff");},0);
               }
               n[atr][atc].splice(di,1);
             }
@@ -1863,8 +1864,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     addLog(UNITS[att.typeId].name+" at "+tileName(fr,fc)+" deals "+dmg+" to "+UNITS[def.typeId].name+" at "+tileName(tr,tc)+(counter>0?" (takes "+counter+" back)":"")+".","default");
 
     if (defDied && def.typeId!==0 && !def.neutral) {
-      if (def.owner==="p1") setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});
-      else setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});
+      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;}); addLog("♛ P1 loses 1 HP! (unit destroyed)","debuff"); }
+      else { setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;}); addLog("♛ P2 loses 1 HP! (unit destroyed)","debuff"); }
       addLog(UNITS[def.typeId].name+" destroyed!","death");
     }
     if (defDied && def.typeId===0) {
@@ -1872,9 +1873,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       addLog("★ King destroyed! "+(cp==="p1"?"YOU WIN!":"OPPONENT WINS!"),"death");
     }
     if (def.typeId===0 && !defDied) {
-      if (def.owner==="p1") setP1Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P2");return nl;});
-      else setP2Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P1");return nl;});
-      addLog("King takes "+dmg+" damage!","debuff");
+      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P2");return nl;}); addLog("♛ P1 King takes "+dmg+" damage!","debuff"); }
+      else { setP2Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P1");return nl;}); addLog("♛ P2 King takes "+dmg+" damage!","debuff"); }
     }
 
     // Keep selected for multi-attack
@@ -1957,7 +1957,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         n[row][col].splice(idx,1);
         addLog(UNITS[dead.typeId].name+" destroyed!","death");
         if(dead.neutral){var li=rollLoot(dead.typeId);setGroundItems(function(prev){var dk=row+","+col;var gn={...prev};gn[dk]=[...(prev[dk]||[]),{name:li.name,desc:li.desc,flavor:li.flavor,color:li.color,apply:li.apply}];return gn;});}
-        if(!dead.neutral&&dead.typeId!==0){if(dead.owner==="p1")setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});else setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});}
+        if(!dead.neutral&&dead.typeId!==0){if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});addLog("♛ P1 loses 1 HP! (unit destroyed by spell)","debuff");}else{setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});addLog("♛ P2 loses 1 HP! (unit destroyed by spell)","debuff");}}
         if(dead.typeId===0)setWinner(cp==="p1"?"P1":"P2");
         return true;
       }
@@ -2203,10 +2203,15 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           </div>
           <div style={{fontSize:9,color:"#4a5568",letterSpacing:2}}>CYCLE {cycleNum}</div>
         </div>
-        {/* P2 info */}
+        {/* Opponent info (top) */}
         <div style={{width:"100%",maxWidth:720,padding:"0 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{fontSize:18,fontWeight:"bold",color:"#fc8181"}}>♛ {vsMode==="cpu"?"REALM":"P2"}: {p2Life}HP</div>
-          <div style={{fontSize:15,fontWeight:"bold",color:"#fc8181"}}>{p2Pts}pt</div>
+          {isOnline?(
+            myRole==="p1"
+              ? <><div style={{fontSize:18,fontWeight:"bold",color:"#fc8181"}}>♛ P2: {p2Life}HP</div><div style={{fontSize:15,fontWeight:"bold",color:"#fc8181"}}>{p2Pts}pt</div></>
+              : <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1"}}>♛ P1: {p1Life}HP</div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1"}}>{p1Pts}pt</div></>
+          ):(
+            <><div style={{fontSize:18,fontWeight:"bold",color:"#fc8181"}}>♛ {vsMode==="cpu"?"REALM":"P2"}: {p2Life}HP</div><div style={{fontSize:15,fontWeight:"bold",color:"#fc8181"}}>{p2Pts}pt</div></>
+          )}
         </div>
         {ev && <div style={{width:"100%",maxWidth:720,padding:"4px 10px",background:ev.color+"18",border:"1px solid "+ev.color+"55",borderLeft:"4px solid "+ev.color,borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div><span style={{fontSize:16,fontWeight:"bold",color:ev.color}}>⚡ {ev.name}</span><span style={{fontSize:11,color:"#a0adb8",marginLeft:8}}>{ev.desc}</span></div>
@@ -2305,11 +2310,16 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             })}
           </div>
         </div>
-        {/* P1 combined bar */}
+        {/* Player combined bar */}
         <div style={{width:"100%",maxWidth:720,padding:"4px 8px",background:"#0d1018",borderTop:"1px solid #1e2535",display:"flex",gap:8,alignItems:"stretch"}}>
           <div style={{display:"flex",flexDirection:"column",justifyContent:"center",gap:2,minWidth:90,flexShrink:0}}>
-            <div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div>
-            <div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div>
+            {isOnline?(
+              myRole==="p1"
+                ? <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ P1 {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div></>
+                : <><div style={{fontSize:18,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>♛ P2 {p2Life}<span style={{fontSize:11,color:"#fc818199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>{p2Pts}<span style={{fontSize:10,color:"#fc818199"}}> pt</span></div></>
+            ):(
+              <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div></>
+            )}
           </div>
           <div style={{width:1,background:"#1e2535",flexShrink:0}}/>
           {isPlay()&&!isCpu&&<React.Fragment>
@@ -2355,7 +2365,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
                 <div style={{fontSize:8,color:isMyTurn&&cpPts>=2?"#d69e2e":"#4a3870"}}>2pt</div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:3,flex:1,maxHeight:80,overflowY:"auto"}}>
-                {(cp==="p1"?p1Hand:p2Hand).map(function(s,i){return (
+                {(isOnline?(myRole==="p1"?p1Hand:p2Hand):(cp==="p1"?p1Hand:p2Hand)).map(function(s,i){return (
                   <div key={i} onClick={function(){if(!isMyTurn)return;if(cpPts<s.cost){addLog(s.name+" costs "+s.cost+"pt.","points");return;}setSelected(null);setCastingSpell(castingSpell===s?null:s);}}
                     style={{background:castingSpell===s?"#1a1030":"#0f1118",border:"1px solid "+(castingSpell===s?"#9f7aea":"#1e2535"),borderLeft:"3px solid "+(isMyTurn&&cpPts>=s.cost?"#9f7aea":"#2a2040"),borderRadius:3,padding:"3px 7px",cursor:isMyTurn&&cpPts>=s.cost?"pointer":"not-allowed",opacity:isMyTurn&&cpPts>=s.cost?1:0.45}}>
                     <div style={{display:"flex",justifyContent:"space-between"}}>
