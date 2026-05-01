@@ -942,108 +942,140 @@ function OnlineLobby({ onReady, onBack }) {
 
 
 // ─── Lobby Chat ───────────────────────────────────────────────────────────────
-// Uses Firebase Realtime Database REST (no SDK, no login required)
-var FIREBASE_URL = "https://lore-of-battle-default-rtdb.firebaseio.com";
+// Uses HiveMQ public MQTT broker over WebSocket — no account or setup required
 
 function LobbyChatPanel({ myRoomCode }) {
-  var [name, setName] = React.useState(function(){return localStorage.getItem("lobbyName")||"";});
   var [nameInput, setNameInput] = React.useState(function(){return localStorage.getItem("lobbyName")||"";});
+  var [name, setName] = React.useState("");
   var [joined, setJoined] = React.useState(false);
   var [players, setPlayers] = React.useState([]);
   var [messages, setMessages] = React.useState([]);
   var [msgInput, setMsgInput] = React.useState("");
   var [dmTarget, setDmTarget] = React.useState("");
+  var [connState, setConnState] = React.useState("idle"); // idle | connecting | connected | error
+  var clientRef = React.useRef(null);
   var myIdRef = React.useRef(null);
-  var pollRef = React.useRef(null);
+  var nameRef = React.useRef("");
+  var playersRef = React.useRef({});
+  var presenceTimerRef = React.useRef(null);
   var msgScrollRef = React.useRef(null);
 
-  function fbFetch(path, method, body){
-    return fetch(FIREBASE_URL+path+".json", {method:method||"GET", body:body?JSON.stringify(body):undefined, headers:body?{"Content-Type":"application/json"}:undefined});
+  var TOPIC_CHAT = "lore-of-battle/lobby/chat";
+  var TOPIC_PRESENCE = "lore-of-battle/lobby/presence";
+
+  function loadMqtt(cb){
+    if(window.mqtt){cb();return;}
+    var s=document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js";
+    s.onload=cb;
+    s.onerror=function(){setConnState("error");};
+    document.head.appendChild(s);
   }
 
   function joinLobby(){
-    var n = nameInput.trim();
-    if(!n) return;
-    localStorage.setItem("lobbyName", n);
-    setName(n);
-    // Register presence
-    fbFetch("/lobby/players.json","POST",{name:n, ts:Date.now()}).then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.name) return;
-      myIdRef.current = d.name; // Firebase push ID
-      setJoined(true);
-      startPolling();
-    }).catch(function(){setJoined(true);startPolling();});
+    var n=nameInput.trim();
+    if(!n)return;
+    localStorage.setItem("lobbyName",n);
+    setName(n);nameRef.current=n;
+    myIdRef.current="p_"+Math.random().toString(36).slice(2,8);
+    setConnState("connecting");
+    loadMqtt(function(){
+      try{
+        var client=window.mqtt.connect("wss://broker.hivemq.com:8884/mqtt",{
+          clientId:"lob_"+Math.random().toString(36).slice(2,10),
+          reconnectPeriod:3000,
+          keepalive:30,
+        });
+        clientRef.current=client;
+        client.on("connect",function(){
+          setConnState("connected");
+          setJoined(true);
+          client.subscribe(TOPIC_CHAT);
+          client.subscribe(TOPIC_PRESENCE);
+          publishPresence(client,n,true);
+          // Heartbeat every 8s
+          presenceTimerRef.current=setInterval(function(){
+            publishPresence(client,nameRef.current,true);
+            // Prune stale players
+            var now=Date.now();
+            var active={};
+            Object.entries(playersRef.current).forEach(function(e){if(now-e[1].ts<20000)active[e[0]]=e[1];});
+            playersRef.current=active;
+            setPlayers(Object.values(active));
+          },8000);
+        });
+        client.on("message",function(topic,payload){
+          try{
+            var msg=JSON.parse(payload.toString());
+            if(topic===TOPIC_PRESENCE){
+              if(msg.id===myIdRef.current)return;
+              if(msg.online){
+                playersRef.current[msg.id]={name:msg.name,ts:Date.now()};
+                setPlayers(Object.values(playersRef.current));
+                // Respond so new joiners see us
+                if(clientRef.current)publishPresence(clientRef.current,nameRef.current,true);
+              } else {
+                delete playersRef.current[msg.id];
+                setPlayers(Object.values(playersRef.current));
+              }
+            }
+            if(topic===TOPIC_CHAT){
+              // Only show if public or DM to/from us
+              if(msg.to&&msg.to!==nameRef.current&&msg.from!==nameRef.current)return;
+              setMessages(function(prev){return [...prev.slice(-49),msg];});
+            }
+          }catch(e){}
+        });
+        client.on("error",function(){setConnState("error");});
+        client.on("offline",function(){setConnState("error");});
+      }catch(e){setConnState("error");}
+    });
+  }
+
+  function publishPresence(client,n,online){
+    try{client.publish(TOPIC_PRESENCE,JSON.stringify({id:myIdRef.current,name:n,online:online}),{qos:0,retain:false});}catch(e){}
   }
 
   function leaveLobby(){
-    if(myIdRef.current) fbFetch("/lobby/players/"+myIdRef.current+".json","DELETE");
-    clearInterval(pollRef.current);
-    setJoined(false);
-    setPlayers([]);
-    setMessages([]);
+    clearInterval(presenceTimerRef.current);
+    if(clientRef.current){
+      try{publishPresence(clientRef.current,nameRef.current,false);}catch(e){}
+      try{clientRef.current.end(true);}catch(e){}
+      clientRef.current=null;
+    }
+    playersRef.current={};
+    setJoined(false);setPlayers([]);setMessages([]);setConnState("idle");
   }
 
-  function startPolling(){
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(function(){
-      // Fetch players
-      fbFetch("/lobby/players.json").then(function(r){return r.json();}).then(function(d){
-        if(!d){setPlayers([]);return;}
-        var now=Date.now();
-        // Remove stale players (older than 20s)
-        var active=Object.entries(d).filter(function(e){return now-e[1].ts<20000;});
-        setPlayers(active.map(function(e){return {id:e[0],name:e[1].name};}));
-        // Refresh own presence
-        if(myIdRef.current) fbFetch("/lobby/players/"+myIdRef.current+".json","PATCH",{ts:now});
-      }).catch(function(){});
-      // Fetch messages (last 30)
-      fbFetch("/lobby/messages.json?orderBy=\"$key\"&limitToLast=30").then(function(r){return r.json();}).then(function(d){
-        if(!d){setMessages([]);return;}
-        setMessages(Object.values(d));
-      }).catch(function(){});
-    }, 3000);
-    // immediate first fetch
-    fbFetch("/lobby/players.json").then(function(r){return r.json();}).then(function(d){
-      if(!d) return;
-      setPlayers(Object.entries(d).map(function(e){return {id:e[0],name:e[1].name};}));
-    }).catch(function(){});
-    fbFetch("/lobby/messages.json?orderBy=\"$key\"&limitToLast=30").then(function(r){return r.json();}).then(function(d){
-      if(!d) return;
-      setMessages(Object.values(d));
-    }).catch(function(){});
-  }
+  React.useEffect(function(){return function(){leaveLobby();};},[]); // eslint-disable-line
 
   React.useEffect(function(){
-    return function(){
-      leaveLobby();
-    };
-  },[]);
-
-  React.useEffect(function(){
-    if(msgScrollRef.current) msgScrollRef.current.scrollTop = msgScrollRef.current.scrollHeight;
+    if(msgScrollRef.current)msgScrollRef.current.scrollTop=msgScrollRef.current.scrollHeight;
   },[messages]);
 
   function sendMsg(){
-    var text = msgInput.trim();
-    if(!text||!name) return;
-    var msg = {from:name, to:dmTarget||null, text:text, ts:Date.now()};
-    fbFetch("/lobby/messages.json","POST",msg);
-    setMsgInput("");
-    setDmTarget("");
+    var text=msgInput.trim();
+    if(!text||!clientRef.current)return;
+    var msg={from:name,to:dmTarget||null,text:text,ts:Date.now()};
+    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
+    setMessages(function(prev){return [...prev.slice(-49),msg];});
+    setMsgInput("");setDmTarget("");
   }
 
   function sendCode(){
-    if(!myRoomCode||!name) return;
-    var msg = {from:name, to:dmTarget||null, text:"🎮 Room code: "+myRoomCode, ts:Date.now(), isCode:true};
-    fbFetch("/lobby/messages.json","POST",msg);
+    if(!myRoomCode||!clientRef.current)return;
+    var msg={from:name,to:dmTarget||null,text:"🎮 Room code: "+myRoomCode,ts:Date.now(),isCode:true};
+    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
+    setMessages(function(prev){return [...prev.slice(-49),msg];});
   }
 
   if(!joined) return (
     <div style={{background:"#0a0e18",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px",width:"100%",boxSizing:"border-box"}}>
       <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,marginBottom:8}}>LOBBY CHAT</div>
+      {connState==="error"&&<div style={{fontSize:9,color:"#fc8181",marginBottom:6}}>Connection failed. Check your internet.</div>}
       <div style={{display:"flex",gap:6}}>
         <input value={nameInput} onChange={function(e){setNameInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")joinLobby();}} placeholder="Enter your name..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"6px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
-        <button onClick={joinLobby} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"6px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1}}>JOIN</button>
+        <button onClick={joinLobby} disabled={connState==="connecting"} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"6px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1,opacity:connState==="connecting"?0.5:1}}>{connState==="connecting"?"...":"JOIN"}</button>
       </div>
     </div>
   );
@@ -1053,35 +1085,29 @@ function LobbyChatPanel({ myRoomCode }) {
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{fontSize:9,color:"#4a5568",letterSpacing:3}}>LOBBY CHAT</div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <span style={{fontSize:9,color:"#68d391"}}>● {name}</span>
+          <span style={{fontSize:9,color:connState==="connected"?"#68d391":"#718096"}}>● {name}</span>
           <button onClick={leaveLobby} style={{background:"none",border:"none",color:"#4a5568",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8}}>LEAVE</button>
         </div>
       </div>
-      {/* Players online */}
       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+        <button style={{background:"#0d0f1a",border:"1px solid #1e2535",color:"#68d391",borderRadius:10,padding:"2px 8px",fontFamily:"Courier New,monospace",fontSize:9,cursor:"default"}}>● {name} (you)</button>
         {players.map(function(p,i){
-          var isMe = myIdRef.current&&p.id===myIdRef.current;
-          var isSel = dmTarget===p.name;
-          return (
-            <button key={i} onClick={function(){setDmTarget(isSel||isMe?"":p.name);}}
-              style={{background:isSel?"#4299e122":"#0d0f1a",border:"1px solid "+(isSel?"#4299e1":"#1e2535"),color:isMe?"#68d391":isSel?"#4299e1":"#a0adb8",borderRadius:10,padding:"2px 8px",cursor:isMe?"default":"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>
-              ● {p.name}{isMe?" (you)":""}
+          var isSel=dmTarget===p.name;
+          return(
+            <button key={i} onClick={function(){setDmTarget(isSel?"":p.name);}}
+              style={{background:isSel?"#4299e122":"#0d0f1a",border:"1px solid "+(isSel?"#4299e1":"#1e2535"),color:isSel?"#4299e1":"#a0adb8",borderRadius:10,padding:"2px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>
+              ● {p.name}
             </button>
           );
         })}
-        {players.length===0&&<span style={{fontSize:9,color:"#2a3550"}}>No one else online</span>}
+        {players.length===0&&<span style={{fontSize:9,color:"#2a3550"}}>No one else online yet</span>}
       </div>
-      {/* Messages */}
       <div ref={msgScrollRef} style={{overflowY:"auto",maxHeight:120,display:"flex",flexDirection:"column",gap:3,background:"#060810",borderRadius:3,padding:"6px 8px"}}>
         {messages.length===0&&<div style={{fontSize:9,color:"#2a3550"}}>No messages yet</div>}
         {messages.map(function(m,i){
-          var isDm=m.to&&m.to!==name&&m.from!==name;
-          if(isDm) return null; // hide DMs not for us
           var isMine=m.from===name;
-          var isDmToMe=m.to===name;
-          var isDmFromMe=m.from===name&&m.to;
-          return (
-            <div key={i} style={{fontSize:9,color:m.isCode?"#f6e05e":isDmToMe||isDmFromMe?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5}}>
+          return(
+            <div key={i} style={{fontSize:9,color:m.isCode?"#f6e05e":m.to?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5}}>
               <span style={{color:isMine?"#4299e1":"#68d391",fontWeight:"bold"}}>{m.from}</span>
               {m.to&&<span style={{color:"#b794f4"}}> → {m.to}</span>}
               <span style={{color:"#2a3550"}}> · </span>{m.text}
@@ -1089,7 +1115,6 @@ function LobbyChatPanel({ myRoomCode }) {
           );
         })}
       </div>
-      {/* Input */}
       <div style={{display:"flex",gap:4,flexDirection:"column"}}>
         {dmTarget&&<div style={{fontSize:8,color:"#b794f4",letterSpacing:1}}>DM → {dmTarget} <button onClick={function(){setDmTarget("");}} style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>✕</button></div>}
         <div style={{display:"flex",gap:4}}>
