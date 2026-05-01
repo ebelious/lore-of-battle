@@ -1210,6 +1210,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     if(!isOnline||!conn)return;
     try{
       var s=onlineSyncRef.current;
+      var evSer=s.activeEvent?{id:s.activeEvent.id,name:s.activeEvent.name,desc:s.activeEvent.desc,lore:s.activeEvent.lore,color:s.activeEvent.color,cycles:s.activeEvent.cycles}:null;
       conn.send({type:"STATE",state:{
         board:s.board,tileEffects:s.tileEffects,
         p1Life:s.p1Life,p2Life:s.p2Life,
@@ -1220,8 +1221,15 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         phase:s.phase,cycleNum:s.cycleNum,
         groundItems:s.groundItems,winner:s.winner,
         eventCyclesLeft:s.eventCyclesLeft,
+        activeEvent:evSer,
       }});
     }catch(e){}
+  }
+
+  function sendOnline(msg){
+    var conn=onlineConnRef.current;
+    if(!isOnline||!conn)return;
+    try{conn.send(msg);}catch(e){}
   }
 
   useEffect(function(){
@@ -1242,7 +1250,16 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         setGroundItems(s.groundItems||{});
         if(s.winner)setWinner(s.winner);
         setEventCyclesLeft(s.eventCyclesLeft||0);
+        if(s.activeEvent!=null){setActiveEvent(s.activeEvent);activeEventRef.current=s.activeEvent;}
+        else if(s.activeEvent===null){setActiveEvent(null);activeEventRef.current=null;}
       }
+      if(msg.type==="SHOW_EVENT_POPUP"){
+        popupCbRef.current=function(){setShowEventPopup(false);}; // peer just dismisses locally
+        setShowEventPopup(true);
+      }
+      if(msg.type==="HIDE_EVENT_POPUP"){setShowEventPopup(false);}
+      if(msg.type==="SHOW_LOOT_POPUP"){setLootPopup(msg.payload);}
+      if(msg.type==="HIDE_LOOT_POPUP"){setLootPopup(null);}
       if(msg.type==="LOG"){addLog(msg.msg,msg.tag);}
       if(msg.type==="DISCONNECT"){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");}
     }
@@ -1457,10 +1474,12 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     addLog(`⚡ EVENT: "${ev.name}" — ${ev.desc} [${cycles} cycle${cycles!==1?"s":""}]`);
     popupCbRef.current = startNextCycle;
     setShowEventPopup(true);
+    sendOnline({type:"SHOW_EVENT_POPUP"});
   }
 
   function startNextCycle() {
     setShowEventPopup(false);
+    sendOnline({type:"HIDE_EVENT_POPUP"});
     const next = cycleRef.current + 1;
     cycleRef.current = next; setCycleNum(next);
 
@@ -1815,7 +1834,11 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if (attOnSameTile) {
         var ai2=n[tr][tc].findIndex(function(x){return x.id===att.id;});
         n[tr][tc][ai2]=grantItem(n[tr][tc][ai2],lootItem);
-        setTimeout(function(){setLootPopup({item:lootItem,unitName:UNITS[att.typeId].name});},0);
+        setTimeout(function(){
+          var payload={item:{name:lootItem.name,desc:lootItem.desc,flavor:lootItem.flavor,color:lootItem.color,legendaryAbility:lootItem.legendaryAbility||null},unitName:UNITS[att.typeId].name};
+          setLootPopup(payload);
+          sendOnline({type:"SHOW_LOOT_POPUP",payload:payload});
+        },0);
       } else {
         var dk=tr+","+tc;
         setGroundItems(function(prev){var gn={...prev};gn[dk]=[...(prev[dk]||[]),{name:lootItem.name,desc:lootItem.desc,flavor:lootItem.flavor,color:lootItem.color,apply:lootItem.apply}];return gn;});
@@ -2430,7 +2453,11 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if (rest.length) nx[k] = rest; else delete nx[k];
       return nx;
     });
-    setTimeout(function(){setLootPopup({item:item, unitName:unitName||'Unit'});}, 50);
+    setTimeout(function(){
+      var payload={item:item, unitName:unitName||'Unit'};
+      setLootPopup(payload);
+      sendOnline({type:"SHOW_LOOT_POPUP",payload:payload});
+    }, 50);
     addLog('Unit picks up '+item.name+'!', 'buff');
   }
 
