@@ -748,11 +748,25 @@ function OnlineLobby({ onReady, onBack }) {
         checkBothRolled(hostSide, deckId);
       }
       if(msg.type==="GAME_START"){
-        var deck=THEME_DECKS.find(function(d){return d.id===msg.deckId;})||THEME_DECKS[0];
-        var p1First=msg.p1First;
-        var myRole=hostSide?"p1":"p2";
-        setStatus("connected");
-        setTimeout(function(){onReady(conn, myRole, deck, p1First);},400);
+        // Only process once joiner has rolled (myRollRef set by doRoll)
+        if(!hostSide && myRollRef.current==null){
+          // Store it and retry after a short poll until rolled
+          var pending=msg;
+          var t=setInterval(function(){
+            if(myRollRef.current!=null){
+              clearInterval(t);
+              var deck=THEME_DECKS.find(function(d){return d.id===pending.deckId;})||THEME_DECKS[0];
+              setStatus("connected");
+              setTimeout(function(){onReady(conn,"p2",deck,pending.p1First);},400);
+            }
+          },100);
+          return;
+        }
+        if(!hostSide){
+          var deck=THEME_DECKS.find(function(d){return d.id===msg.deckId;})||THEME_DECKS[0];
+          setStatus("connected");
+          setTimeout(function(){onReady(conn,"p2",deck,msg.p1First);},400);
+        }
       }
     });
     conn.on("error",function(e){setStatus("error");setErrorMsg("Connection error: "+e.message);});
