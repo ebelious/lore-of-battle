@@ -887,6 +887,7 @@ function OnlineLobby({ onReady, onBack }) {
           <button onClick={joinGame} disabled={!joinCode.trim()} style={{background:joinCode.trim()?"#063010":"#0a0c14",border:"1px solid "+(joinCode.trim()?"#68d39155":"#1e2535"),color:joinCode.trim()?"#68d391":"#2a3550",borderRadius:3,padding:"10px",cursor:joinCode.trim()?"pointer":"not-allowed",fontFamily:"Courier New,monospace",fontSize:11,letterSpacing:2}}>CONNECT →</button>
         </div>
         {errorMsg&&<div style={{color:"#fc8181",fontSize:10,textAlign:"center",padding:"6px 10px",background:"#1a0808",borderRadius:3,border:"1px solid #c5303033"}}>{errorMsg}</div>}
+        <LobbyChatPanel myRoomCode={fullRoomCode}/>
       </div>}
 
       {status==="loading"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
@@ -902,6 +903,7 @@ function OnlineLobby({ onReady, onBack }) {
           {fullRoomCode&&<button onClick={function(){navigator.clipboard&&navigator.clipboard.writeText(fullRoomCode);}} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"5px 14px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>COPY CODE</button>}
         </div>
         <div style={{fontSize:10,color:"#4a5568",textAlign:"center"}}>Share the code above with your opponent.<br/>They paste it into "Join a Room".</div>
+        <LobbyChatPanel myRoomCode={fullRoomCode}/>
         <button onClick={function(){if(peerRef.current){try{peerRef.current.destroy();}catch(e){}}setStatus("idle");setRoomCode("");}} style={{background:"none",border:"1px solid #c5303044",color:"#c53030",borderRadius:3,padding:"6px 16px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>CANCEL</button>
       </div>}
 
@@ -938,6 +940,167 @@ function OnlineLobby({ onReady, onBack }) {
   );
 }
 
+
+// ─── Lobby Chat ───────────────────────────────────────────────────────────────
+// Uses Firebase Realtime Database REST (no SDK, no login required)
+var FIREBASE_URL = "https://lore-of-battle-default-rtdb.firebaseio.com";
+
+function LobbyChatPanel({ myRoomCode }) {
+  var [name, setName] = React.useState(function(){return localStorage.getItem("lobbyName")||"";});
+  var [nameInput, setNameInput] = React.useState(function(){return localStorage.getItem("lobbyName")||"";});
+  var [joined, setJoined] = React.useState(false);
+  var [players, setPlayers] = React.useState([]);
+  var [messages, setMessages] = React.useState([]);
+  var [msgInput, setMsgInput] = React.useState("");
+  var [dmTarget, setDmTarget] = React.useState("");
+  var myIdRef = React.useRef(null);
+  var pollRef = React.useRef(null);
+  var msgScrollRef = React.useRef(null);
+
+  function fbFetch(path, method, body){
+    return fetch(FIREBASE_URL+path+".json", {method:method||"GET", body:body?JSON.stringify(body):undefined, headers:body?{"Content-Type":"application/json"}:undefined});
+  }
+
+  function joinLobby(){
+    var n = nameInput.trim();
+    if(!n) return;
+    localStorage.setItem("lobbyName", n);
+    setName(n);
+    // Register presence
+    fbFetch("/lobby/players.json","POST",{name:n, ts:Date.now()}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.name) return;
+      myIdRef.current = d.name; // Firebase push ID
+      setJoined(true);
+      startPolling();
+    }).catch(function(){setJoined(true);startPolling();});
+  }
+
+  function leaveLobby(){
+    if(myIdRef.current) fbFetch("/lobby/players/"+myIdRef.current+".json","DELETE");
+    clearInterval(pollRef.current);
+    setJoined(false);
+    setPlayers([]);
+    setMessages([]);
+  }
+
+  function startPolling(){
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(function(){
+      // Fetch players
+      fbFetch("/lobby/players.json").then(function(r){return r.json();}).then(function(d){
+        if(!d){setPlayers([]);return;}
+        var now=Date.now();
+        // Remove stale players (older than 20s)
+        var active=Object.entries(d).filter(function(e){return now-e[1].ts<20000;});
+        setPlayers(active.map(function(e){return {id:e[0],name:e[1].name};}));
+        // Refresh own presence
+        if(myIdRef.current) fbFetch("/lobby/players/"+myIdRef.current+".json","PATCH",{ts:now});
+      }).catch(function(){});
+      // Fetch messages (last 30)
+      fbFetch("/lobby/messages.json?orderBy=\"$key\"&limitToLast=30").then(function(r){return r.json();}).then(function(d){
+        if(!d){setMessages([]);return;}
+        setMessages(Object.values(d));
+      }).catch(function(){});
+    }, 3000);
+    // immediate first fetch
+    fbFetch("/lobby/players.json").then(function(r){return r.json();}).then(function(d){
+      if(!d) return;
+      setPlayers(Object.entries(d).map(function(e){return {id:e[0],name:e[1].name};}));
+    }).catch(function(){});
+    fbFetch("/lobby/messages.json?orderBy=\"$key\"&limitToLast=30").then(function(r){return r.json();}).then(function(d){
+      if(!d) return;
+      setMessages(Object.values(d));
+    }).catch(function(){});
+  }
+
+  React.useEffect(function(){
+    return function(){
+      leaveLobby();
+    };
+  },[]);
+
+  React.useEffect(function(){
+    if(msgScrollRef.current) msgScrollRef.current.scrollTop = msgScrollRef.current.scrollHeight;
+  },[messages]);
+
+  function sendMsg(){
+    var text = msgInput.trim();
+    if(!text||!name) return;
+    var msg = {from:name, to:dmTarget||null, text:text, ts:Date.now()};
+    fbFetch("/lobby/messages.json","POST",msg);
+    setMsgInput("");
+    setDmTarget("");
+  }
+
+  function sendCode(){
+    if(!myRoomCode||!name) return;
+    var msg = {from:name, to:dmTarget||null, text:"🎮 Room code: "+myRoomCode, ts:Date.now(), isCode:true};
+    fbFetch("/lobby/messages.json","POST",msg);
+  }
+
+  if(!joined) return (
+    <div style={{background:"#0a0e18",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px",width:"100%",boxSizing:"border-box"}}>
+      <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,marginBottom:8}}>LOBBY CHAT</div>
+      <div style={{display:"flex",gap:6}}>
+        <input value={nameInput} onChange={function(e){setNameInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")joinLobby();}} placeholder="Enter your name..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"6px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
+        <button onClick={joinLobby} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"6px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1}}>JOIN</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{background:"#0a0e18",border:"1px solid #1e2535",borderRadius:4,padding:"12px 14px",width:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:9,color:"#4a5568",letterSpacing:3}}>LOBBY CHAT</div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <span style={{fontSize:9,color:"#68d391"}}>● {name}</span>
+          <button onClick={leaveLobby} style={{background:"none",border:"none",color:"#4a5568",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8}}>LEAVE</button>
+        </div>
+      </div>
+      {/* Players online */}
+      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+        {players.map(function(p,i){
+          var isMe = myIdRef.current&&p.id===myIdRef.current;
+          var isSel = dmTarget===p.name;
+          return (
+            <button key={i} onClick={function(){setDmTarget(isSel||isMe?"":p.name);}}
+              style={{background:isSel?"#4299e122":"#0d0f1a",border:"1px solid "+(isSel?"#4299e1":"#1e2535"),color:isMe?"#68d391":isSel?"#4299e1":"#a0adb8",borderRadius:10,padding:"2px 8px",cursor:isMe?"default":"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>
+              ● {p.name}{isMe?" (you)":""}
+            </button>
+          );
+        })}
+        {players.length===0&&<span style={{fontSize:9,color:"#2a3550"}}>No one else online</span>}
+      </div>
+      {/* Messages */}
+      <div ref={msgScrollRef} style={{overflowY:"auto",maxHeight:120,display:"flex",flexDirection:"column",gap:3,background:"#060810",borderRadius:3,padding:"6px 8px"}}>
+        {messages.length===0&&<div style={{fontSize:9,color:"#2a3550"}}>No messages yet</div>}
+        {messages.map(function(m,i){
+          var isDm=m.to&&m.to!==name&&m.from!==name;
+          if(isDm) return null; // hide DMs not for us
+          var isMine=m.from===name;
+          var isDmToMe=m.to===name;
+          var isDmFromMe=m.from===name&&m.to;
+          return (
+            <div key={i} style={{fontSize:9,color:m.isCode?"#f6e05e":isDmToMe||isDmFromMe?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5}}>
+              <span style={{color:isMine?"#4299e1":"#68d391",fontWeight:"bold"}}>{m.from}</span>
+              {m.to&&<span style={{color:"#b794f4"}}> → {m.to}</span>}
+              <span style={{color:"#2a3550"}}> · </span>{m.text}
+            </div>
+          );
+        })}
+      </div>
+      {/* Input */}
+      <div style={{display:"flex",gap:4,flexDirection:"column"}}>
+        {dmTarget&&<div style={{fontSize:8,color:"#b794f4",letterSpacing:1}}>DM → {dmTarget} <button onClick={function(){setDmTarget("");}} style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>✕</button></div>}
+        <div style={{display:"flex",gap:4}}>
+          <input value={msgInput} onChange={function(e){setMsgInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")sendMsg();}} placeholder={dmTarget?"Message "+dmTarget+"...":"Message everyone..."} style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"5px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
+          <button onClick={sendMsg} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>SEND</button>
+          {myRoomCode&&<button onClick={sendCode} style={{background:"#d69e2e22",border:"1px solid #d69e2e44",color:"#d69e2e",borderRadius:3,padding:"5px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>SEND CODE</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SpellBookSelect({current, onConfirm, onBack}) {
   var saved=loadSavedSpellBook();
