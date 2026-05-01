@@ -1313,15 +1313,15 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       firstWentRef.current = true;
       const newPts = Math.min(cycleRef.current, secondP==="p1"?p1MaxPts:p2MaxPts);
       untapPlayer(secondP);
-      if (secondP==="p1") setP1Pts(newPts); else setP2Pts(newPts);
-      // Apply active event instant bonus to second player turn too
+      // Apply active event instant bonus to second player's turn allocation
       const evNow2 = activeEventRef.current;
+      var spBonus=0;
       if (evNow2 && evNow2.instant) {
         const s2 = {pts1:0, pts2:0};
         evNow2.instant(s2);
-        const pBonus = secondP==="p1"?s2.pts1:s2.pts2;
-        if (pBonus !== 0) { if(secondP==="p1") setP1Pts(function(p){return Math.max(0,p+pBonus);}); else setP2Pts(function(p){return Math.max(0,p+pBonus);}); }
+        spBonus = secondP==="p1"?s2.pts1:s2.pts2;
       }
+      if (secondP==="p1") setP1Pts(Math.max(0,newPts+spBonus)); else setP2Pts(Math.max(0,newPts+spBonus));
       phaseRef.current = secondP; setPhase(secondP);
       addLog(`⚔ ${secondP==="p1"?"Your":"Opponent's"} turn — ${newPts}pt.`);
     } else {
@@ -1418,9 +1418,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     if (ev.instant) {
       const s = { pts1: 0, pts2: 0 };
       ev.instant(s);
-      // Store bonus — applied on top of cycle allocation in startNextCycle
-      if (s.pts1 !== 0) setP1Pts(p => Math.max(0, p + s.pts1));
-      if (s.pts2 !== 0) setP2Pts(p => Math.max(0, p + s.pts2));
+      // Points are applied in startNextCycle after the popup is dismissed,
+      // so they aren't overwritten by the cycle-number reset there.
       addLog(`💰 ${ev.name}: P1 ${s.pts1>=0?"+":""}${s.pts1}pt, P2 ${s.pts2>=0?"+":""}${s.pts2}pt`);
     }
 
@@ -1497,16 +1496,18 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     // Start first player's turn
     untapPlayer(firstP);
     const pts = Math.min(next, firstP==="p1"?p1MaxPts:p2MaxPts);
-    if (firstP==="p1") setP1Pts(pts); else setP2Pts(pts);
-    // Apply active event instant bonus each cycle while event is running
+    const secondPts = Math.min(next, firstP==="p1"?p2MaxPts:p1MaxPts);
+    // Apply active event instant bonus for both players
     const evNow = activeEventRef.current;
+    var bonus1=0, bonus2=0;
     if (evNow && evNow.instant) {
       const s = {pts1:0, pts2:0};
       evNow.instant(s);
-      if (s.pts1 !== 0) setP1Pts(function(p){return Math.max(0, p + s.pts1);});
-      if (s.pts2 !== 0) setP2Pts(function(p){return Math.max(0, p + s.pts2);});
+      bonus1=s.pts1; bonus2=s.pts2;
       addLog("💰 "+evNow.name+" (ongoing): P1 "+(s.pts1>=0?"+":"")+s.pts1+"pt, P2 "+(s.pts2>=0?"+":"")+s.pts2+"pt","points");
     }
+    setP1Pts(Math.max(0,(firstP==="p1"?pts:secondPts)+bonus1));
+    setP2Pts(Math.max(0,(firstP==="p2"?pts:secondPts)+bonus2));
     phaseRef.current = firstP; setPhase(firstP);
     addLog(`⚔ ${firstP==="p1"?"Your":"Opponent's"} turn — ${pts}pt. (Cycle ${next})`);
   }
@@ -2427,7 +2428,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       {winner&&(
         <div style={{position:"fixed",inset:0,background:"#000000cc",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}>
           <div style={{background:"#0d1018",border:"2px solid #d69e2e",borderRadius:6,padding:"40px 60px",textAlign:"center",fontFamily:"Courier New,monospace"}}>
-            <div style={{fontSize:32,fontWeight:"bold",color:"#d69e2e",marginBottom:12}}>{winner==="P1"?"YOU WIN!":"YOU LOSE"}</div>
+            <div style={{fontSize:32,fontWeight:"bold",color:"#d69e2e",marginBottom:12}}>{isOnline?(winner===(myRole==="p1"?"P1":"P2")?"YOU WIN!":"YOU LOSE"):(winner==="P1"?"YOU WIN!":"YOU LOSE")}</div>
             <button onClick={onMenu} style={{background:"#1a1208",border:"1px solid #d69e2e44",color:"#d69e2e",borderRadius:3,padding:"10px 30px",cursor:"pointer",fontFamily:"inherit",fontSize:11,letterSpacing:3}}>MAIN MENU</button>
           </div>
         </div>
