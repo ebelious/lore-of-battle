@@ -1254,7 +1254,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         else if(s.activeEvent===null){setActiveEvent(null);activeEventRef.current=null;}
       }
       if(msg.type==="SHOW_EVENT_POPUP"){
-        popupCbRef.current=function(){setShowEventPopup(false);}; // peer just dismisses locally
+        if(msg.ev){setActiveEvent(msg.ev);activeEventRef.current=msg.ev;}
+        popupCbRef.current=function(){setShowEventPopup(false);};
         setShowEventPopup(true);
       }
       if(msg.type==="HIDE_EVENT_POPUP"){setShowEventPopup(false);}
@@ -1474,7 +1475,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     addLog(`⚡ EVENT: "${ev.name}" — ${ev.desc} [${cycles} cycle${cycles!==1?"s":""}]`);
     popupCbRef.current = startNextCycle;
     setShowEventPopup(true);
-    sendOnline({type:"SHOW_EVENT_POPUP"});
+    var evSer={id:ev.id,name:ev.name,desc:ev.desc,lore:ev.lore,color:ev.color,cycles:ev.cycles};
+    sendOnline({type:"SHOW_EVENT_POPUP",ev:evSer});
   }
 
   function startNextCycle() {
