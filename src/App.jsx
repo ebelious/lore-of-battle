@@ -722,9 +722,11 @@ function OnlineLobby({ onReady, onBack }) {
   var connRef = React.useRef(null);
   var myRollRef = React.useRef(null);
   var oppRollRef = React.useRef(null);
+  var readyRef = React.useRef(false);
 
   React.useEffect(function(){
     return function(){
+      if(readyRef.current)return; // game started — don't destroy the live connection
       if(connRef.current){try{connRef.current.close();}catch(e){}}
       if(peerRef.current){try{peerRef.current.destroy();}catch(e){}}
     };
@@ -757,6 +759,7 @@ function OnlineLobby({ onReady, onBack }) {
               clearInterval(t);
               var deck=THEME_DECKS.find(function(d){return d.id===pending.deckId;})||THEME_DECKS[0];
               setStatus("connected");
+              readyRef.current=true;
               setTimeout(function(){onReady(conn,"p2",deck,pending.p1First);},400);
             }
           },100);
@@ -765,6 +768,7 @@ function OnlineLobby({ onReady, onBack }) {
         if(!hostSide){
           var deck=THEME_DECKS.find(function(d){return d.id===msg.deckId;})||THEME_DECKS[0];
           setStatus("connected");
+          readyRef.current=true;
           setTimeout(function(){onReady(conn,"p2",deck,msg.p1First);},400);
         }
       }
@@ -793,6 +797,7 @@ function OnlineLobby({ onReady, onBack }) {
       connRef.current.send({type:"GAME_START",deckId:deckId,p1First:p1First});
       setStatus("connected");
       var deck=THEME_DECKS.find(function(d){return d.id===deckId;})||THEME_DECKS[0];
+      readyRef.current=true;
       setTimeout(function(){onReady(connRef.current,"p1",deck,p1First);},400);
     }
     // guest waits for GAME_START from host
