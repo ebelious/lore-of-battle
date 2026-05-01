@@ -966,8 +966,8 @@ function LobbyChatPanel({ myRoomCode }) {
   function loadMqtt(cb){
     if(window.mqtt){cb();return;}
     var s=document.createElement("script");
-    s.src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js";
-    s.onload=cb;
+    s.src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js";
+    s.onload=function(){cb();};
     s.onerror=function(){setConnState("error");};
     document.head.appendChild(s);
   }
@@ -980,10 +980,13 @@ function LobbyChatPanel({ myRoomCode }) {
     myIdRef.current="p_"+Math.random().toString(36).slice(2,8);
     setConnState("connecting");
     loadMqtt(function(){
+      var mqttLib=window.mqtt||window.Mqtt;
+      if(!mqttLib){setConnState("error");return;}
       try{
-        var client=window.mqtt.connect("wss://broker.hivemq.com:8884/mqtt",{
+        var client=mqttLib.connect("wss://test.mosquitto.org:8081",{
           clientId:"lob_"+Math.random().toString(36).slice(2,10),
-          reconnectPeriod:3000,
+          reconnectPeriod:0,
+          connectTimeout:8000,
           keepalive:30,
         });
         clientRef.current=client;
