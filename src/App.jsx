@@ -1197,12 +1197,15 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   // ── Online sync ───────────────────────────────────────────────────────────
   var onlineSyncRef = useRef(null);
   onlineSyncRef.current = {board,tileEffects,p1Life,p2Life,p1Pts,p2Pts,p1MaxPts,p2MaxPts,p1Unlocked,p2Unlocked,p1Hand,p2Hand,phase,cycleNum,groundItems,winner,activeEvent,eventCyclesLeft};
+  var onlineConnRef = useRef(onlineConn);
+  onlineConnRef.current = onlineConn;
 
   function sendState(){
-    if(!isOnline||!onlineConn)return;
+    var conn=onlineConnRef.current;
+    if(!isOnline||!conn)return;
     try{
       var s=onlineSyncRef.current;
-      onlineConn.send({type:"STATE",state:{
+      conn.send({type:"STATE",state:{
         board:s.board,tileEffects:s.tileEffects,
         p1Life:s.p1Life,p2Life:s.p2Life,
         p1Pts:s.p1Pts,p2Pts:s.p2Pts,
@@ -1238,10 +1241,16 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if(msg.type==="LOG"){addLog(msg.msg,msg.tag);}
       if(msg.type==="DISCONNECT"){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");}
     }
+    function handleClose(){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");}
+    function handleError(){setOnlineStatus("disconnected");addLog("Connection error.","death");}
     onlineConn.on("data",handleData);
-    onlineConn.on("close",function(){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");});
-    onlineConn.on("error",function(){setOnlineStatus("disconnected");addLog("Connection error.","death");});
-    return function(){try{onlineConn.off("data",handleData);}catch(e){}};
+    onlineConn.on("close",handleClose);
+    onlineConn.on("error",handleError);
+    return function(){
+      try{onlineConn.off("data",handleData);}catch(e){}
+      try{onlineConn.off("close",handleClose);}catch(e){}
+      try{onlineConn.off("error",handleError);}catch(e){}
+    };
   },[isOnline,onlineConn]);
 
   function addLog(msg, type) {
@@ -2181,10 +2190,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         {/* Board + row labels */}
         <div style={{display:"flex",gap:2,width:"100%",maxWidth:720,paddingLeft:8,paddingRight:8}}>
           <div style={{display:"flex",flexDirection:"column",gap:2,width:22,flexShrink:0}}>
-            {Array.from({length:BOARD},function(_,i){return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#4a5568",flex:1}}>{i+1}</div>;})}
+            {Array.from({length:BOARD},function(_,i){var rowNum=isOnline&&myRole==="p2"?i+1:BOARD-i;return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#4a5568",flex:1}}>{rowNum}</div>;})}
           </div>
           <div style={{flex:1,display:"grid",gridTemplateColumns:"repeat("+BOARD+",1fr)",gap:2,background:(deck&&deck.color?deck.color:"#4299e1")+"18",border:"1px solid "+(deck&&deck.color?deck.color:"#4299e1")+"33",padding:4,borderRadius:4,position:"relative"}}>            {Array.from({length:BOARD},function(_,displayR){
-              var r=BOARD-1-displayR;
+              var r=isOnline&&myRole==="p2" ? displayR : BOARD-1-displayR;
               return Array.from({length:BOARD},function(_2,c){
                 var cell=board[r][c];
                 var hl=getTileHL(r,c);
