@@ -689,10 +689,11 @@ export default function App() {
   const [myOnlineRole, setMyOnlineRole] = useState("p1");
   const [onlineDeck, setOnlineDeck] = useState(null);
 
-  function handleOnlineReady(conn, role, deck) {
+  function handleOnlineReady(conn, role, deck, p1First) {
     setOnlineConn(conn);
     setMyOnlineRole(role);
     setOnlineDeck(deck||THEME_DECKS[0]);
+    setP1First(p1First!=null ? p1First : role==="p1");
     setVsMode("online");
     setScreen("game");
   }
@@ -702,19 +703,25 @@ export default function App() {
   if (screen === "spellbook") return <SpellBookSelect current={chosenSpellBook} onConfirm={function(b){setChosenSpellBook(b);saveSpellBook(b);setScreen("menu");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "deck")      return <DeckSelect onConfirm={function(d){setChosenDeck(d);setScreen("dice");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "dice")      return <DiceScreen vsMode={vsMode} onDone={function(p1f){setP1First(p1f);setScreen("game");}} />;
-  if (screen === "game")      return <Game vsMode={vsMode} p1First={vsMode==="online"?myOnlineRole==="p1":p1First} chosenDeck={vsMode==="online"?onlineDeck:chosenDeck} chosenSpellBook={chosenSpellBook} onlineConn={vsMode==="online"?onlineConn:null} myOnlineRole={vsMode==="online"?myOnlineRole:null} onMenu={function(){if(onlineConn){try{onlineConn.close();}catch(e){}setOnlineConn(null);}setScreen("menu");}} />;
+  if (screen === "game")      return <Game vsMode={vsMode} p1First={p1First} chosenDeck={vsMode==="online"?onlineDeck:chosenDeck} chosenSpellBook={chosenSpellBook} onlineConn={vsMode==="online"?onlineConn:null} myOnlineRole={vsMode==="online"?myOnlineRole:null} onMenu={function(){if(onlineConn){try{onlineConn.close();}catch(e){}setOnlineConn(null);}setScreen("menu");}} />;
   return null;
 }
 
 // ─── Online Lobby ─────────────────────────────────────────────────────────────
 function OnlineLobby({ onReady, onBack }) {
-  var [status, setStatus] = React.useState("idle"); // idle | loading | hosting | joining | connected | error
+  var [status, setStatus] = React.useState("idle"); // idle | loading | hosting | joining | dice | connected | error
   var [roomCode, setRoomCode] = React.useState("");
   var [joinCode, setJoinCode] = React.useState("");
   var [errorMsg, setErrorMsg] = React.useState("");
   var [deckChoice, setDeckChoice] = React.useState(THEME_DECKS[0]);
+  var [myRoll, setMyRoll] = React.useState(null);
+  var [oppRoll, setOppRoll] = React.useState(null);
+  var [isHost, setIsHost] = React.useState(false);
+  var [rolling, setRolling] = React.useState(false);
   var peerRef = React.useRef(null);
   var connRef = React.useRef(null);
+  var myRollRef = React.useRef(null);
+  var oppRollRef = React.useRef(null);
 
   React.useEffect(function(){
     return function(){
@@ -732,25 +739,79 @@ function OnlineLobby({ onReady, onBack }) {
     document.head.appendChild(s);
   }
 
+  function attachConnHandlers(conn, hostSide, deckId){
+    conn.on("data",function(msg){
+      if(!msg)return;
+      if(msg.type==="DICE_ROLL"){
+        oppRollRef.current=msg.roll;
+        setOppRoll(msg.roll);
+        checkBothRolled(hostSide, deckId);
+      }
+      if(msg.type==="GAME_START"){
+        var deck=THEME_DECKS.find(function(d){return d.id===msg.deckId;})||THEME_DECKS[0];
+        var p1First=msg.p1First;
+        var myRole=hostSide?"p1":"p2";
+        setStatus("connected");
+        setTimeout(function(){onReady(conn, myRole, deck, p1First);},400);
+      }
+    });
+    conn.on("error",function(e){setStatus("error");setErrorMsg("Connection error: "+e.message);});
+    conn.on("close",function(){if(status!=="connected")setStatus("error"),setErrorMsg("Opponent disconnected.");});
+  }
+
+  function checkBothRolled(hostSide, deckId){
+    var mine=myRollRef.current;
+    var opp=oppRollRef.current;
+    if(mine==null||opp==null)return;
+    // reroll ties automatically
+    if(mine===opp){
+      var newMine=Math.ceil(Math.random()*6);
+      myRollRef.current=newMine;
+      setMyRoll(newMine);
+      setOppRoll(null);
+      oppRollRef.current=null;
+      connRef.current.send({type:"DICE_ROLL",roll:newMine});
+      return;
+    }
+    // host decides p1First and sends GAME_START to guest
+    if(hostSide){
+      var p1First=mine>opp; // host (p1 role) goes first if they rolled higher
+      connRef.current.send({type:"GAME_START",deckId:deckId,p1First:p1First});
+      setStatus("connected");
+      var deck=THEME_DECKS.find(function(d){return d.id===deckId;})||THEME_DECKS[0];
+      setTimeout(function(){onReady(connRef.current,"p1",deck,p1First);},400);
+    }
+    // guest waits for GAME_START from host
+  }
+
+  function doRoll(){
+    if(rolling||myRoll!=null)return;
+    setRolling(true);
+    var roll=Math.ceil(Math.random()*6);
+    myRollRef.current=roll;
+    setMyRoll(roll);
+    connRef.current.send({type:"DICE_ROLL",roll:roll});
+    checkBothRolled(isHost, isHost?deckChoice.id:null);
+    setRolling(false);
+  }
+
   function hostGame(){
     setStatus("loading");
     loadPeerJS(function(){
       try{
         var peer=new window.Peer(undefined,{debug:0});
         peerRef.current=peer;
-        peer.on("open",function(id){
-          var code=id.slice(-6).toUpperCase();
-          setRoomCode(code);
+        peer.on("open",function(){
+          setRoomCode(peer.id);
           setStatus("hosting");
           peer.on("connection",function(conn){
             connRef.current=conn;
+            setIsHost(true);
             conn.on("open",function(){
-              // send deck choice to guest
-              conn.send({type:"GAME_START",deckId:deckChoice.id,role:"p2"});
-              setStatus("connected");
-              setTimeout(function(){onReady(conn,"p1",deckChoice);},200);
+              setMyRoll(null);setOppRoll(null);myRollRef.current=null;oppRollRef.current=null;
+              setStatus("dice");
             });
-            conn.on("error",function(e){setStatus("error");setErrorMsg("Connection error: "+e.message);});
+            attachConnHandlers(conn,true,deckChoice.id);
           });
         });
         peer.on("error",function(e){setStatus("error");setErrorMsg("Peer error: "+e.message);});
@@ -766,36 +827,22 @@ function OnlineLobby({ onReady, onBack }) {
         var peer=new window.Peer(undefined,{debug:0});
         peerRef.current=peer;
         peer.on("open",function(){
-          // find the host's full peer ID by connecting with the short code suffix
-          // We connect to a peer whose ID ends with the code; host broadcasts full ID
-          // Simple approach: host shares full peer ID, we show last 6 chars as room code
-          // Guest uses the full peer ID — but we only show 6 chars.
-          // Better: encode full peer ID as base36 short code, or use a relay.
-          // Practical: show full peer ID as the "room code" (copy-paste)
-          var targetId=joinCode.trim();
-          var conn=peer.connect(targetId,{reliable:true});
+          var conn=peer.connect(joinCode.trim(),{reliable:true});
           connRef.current=conn;
+          setIsHost(false);
           conn.on("open",function(){
-            setStatus("connected");
+            setMyRoll(null);setOppRoll(null);myRollRef.current=null;oppRollRef.current=null;
+            setStatus("dice");
           });
-          conn.on("data",function(msg){
-            if(msg&&msg.type==="GAME_START"){
-              var deck=THEME_DECKS.find(function(d){return d.id===msg.deckId;})||THEME_DECKS[0];
-              setTimeout(function(){onReady(conn,"p2",deck);},200);
-            }
-          });
-          conn.on("error",function(e){setStatus("error");setErrorMsg("Could not connect: "+e.message);});
+          attachConnHandlers(conn,false,null);
         });
         peer.on("error",function(e){setStatus("error");setErrorMsg("Peer error: "+e.message);});
       }catch(e){setStatus("error");setErrorMsg("Error: "+e.message);}
     });
   }
 
-  var S={
-    idle:{},hosting:{},joining:{},loading:{},connected:{},error:{}
-  };
-  var isLoading=status==="loading"||status==="connected";
   var fullRoomCode = peerRef.current&&peerRef.current.id ? peerRef.current.id : "";
+  var faces = ["","⚀","⚁","⚂","⚃","⚄","⚅"];
 
   return (
     <div style={{minHeight:"100vh",background:"#0d0b08",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:"Courier New,monospace",color:"#c8a96e",padding:20,position:"relative"}}>
@@ -804,7 +851,6 @@ function OnlineLobby({ onReady, onBack }) {
       <div style={{fontSize:11,color:"#718096",textAlign:"center",maxWidth:400}}>Play peer-to-peer. No account needed.<br/>Share your room code with your opponent.</div>
 
       {status==="idle"&&<div style={{display:"flex",flexDirection:"column",gap:12,width:"100%",maxWidth:380}}>
-        {/* Deck choice */}
         <div style={{background:"#0d0f1a",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px"}}>
           <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,marginBottom:8}}>CHOOSE BATTLE DECK</div>
           <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -813,11 +859,9 @@ function OnlineLobby({ onReady, onBack }) {
             );})}
           </div>
         </div>
-        {/* Host */}
         <button onClick={hostGame} style={{background:"#060e10",border:"1px solid #0e3040",borderLeft:"3px solid #4299e1",color:"#4299e1",borderRadius:3,padding:"14px 20px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:12,letterSpacing:3,textAlign:"left"}}>
           ⊕ CREATE ROOM
         </button>
-        {/* Join */}
         <div style={{background:"#0d0f1a",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:9,color:"#4a5568",letterSpacing:3}}>JOIN A ROOM</div>
           <input value={joinCode} onChange={function(e){setJoinCode(e.target.value);setErrorMsg("");}} placeholder="Paste room code here..." style={{background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"6px 10px",fontFamily:"Courier New,monospace",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"}}/>
@@ -840,6 +884,26 @@ function OnlineLobby({ onReady, onBack }) {
         </div>
         <div style={{fontSize:10,color:"#4a5568",textAlign:"center"}}>Share the code above with your opponent.<br/>They paste it into "Join a Room".</div>
         <button onClick={function(){if(peerRef.current){try{peerRef.current.destroy();}catch(e){}}setStatus("idle");setRoomCode("");}} style={{background:"none",border:"1px solid #c5303044",color:"#c53030",borderRadius:3,padding:"6px 16px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>CANCEL</button>
+      </div>}
+
+      {status==="dice"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:20,width:"100%",maxWidth:420}}>
+        <div style={{fontSize:9,color:"#4a3810",letterSpacing:5}}>⚔ WHO STRIKES FIRST ⚔</div>
+        <div style={{display:"flex",gap:48,alignItems:"center"}}>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#4299e1",letterSpacing:3,marginBottom:10}}>YOU</div>
+            <div style={{fontSize:72,color:myRoll?"#4299e1":"#2a1e08"}}>{myRoll?faces[myRoll]:"⚀"}</div>
+            {myRoll&&<div style={{fontSize:22,fontWeight:"bold",color:"#4299e1",marginTop:6}}>{myRoll}</div>}
+          </div>
+          <div style={{fontSize:18,color:"#2a1e08"}}>VS</div>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#fc8181",letterSpacing:3,marginBottom:10}}>OPPONENT</div>
+            <div style={{fontSize:72,color:oppRoll?"#fc8181":"#2a1e08"}}>{oppRoll?faces[oppRoll]:"⚀"}</div>
+            {oppRoll&&<div style={{fontSize:22,fontWeight:"bold",color:"#fc8181",marginTop:6}}>{oppRoll}</div>}
+          </div>
+        </div>
+        {!myRoll&&<button onClick={doRoll} style={{background:"#1a1208",border:"1px solid #d69e2e44",color:"#d69e2e",borderRadius:3,padding:"11px 40px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:11,letterSpacing:3}}>⚄ ROLL THE DICE</button>}
+        {myRoll&&!oppRoll&&<div style={{fontSize:11,color:"#718096",letterSpacing:2}}>WAITING FOR OPPONENT TO ROLL...</div>}
+        {myRoll&&oppRoll&&myRoll===oppRoll&&<div style={{fontSize:11,color:"#d69e2e",letterSpacing:2}}>TIE — ROLLING AGAIN...</div>}
       </div>}
 
       {status==="connected"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
@@ -2199,24 +2263,24 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
               <div style={{fontSize:7,color:"#4a5568",letterSpacing:2}}>MELEE</div>
               <div style={{display:"flex",gap:3}}>
-                {[1,2,3].map(function(tid){var isU=unlocked.has(tid);var canAfford=cpPts>=UNITS[tid].cost;return (
+                {[1,2,3].map(function(tid){var isU=unlocked.has(tid);var canAfford=cpPts>=UNITS[tid].cost;var off=!isMyTurn;return (
                   <button key={tid}
                     onMouseEnter={function(e){setBtnTip({typeId:tid,x:e.clientX,y:e.clientY});}}
                     onMouseLeave={function(){setBtnTip(null);}}
-                    onClick={function(){if(!isU){addLog(UNITS[tid].name+" locked.");return;}setSpawnMode(spawnMode===tid?null:tid);setSelected(null);}}
-                    style={{background:spawnMode===tid?"#4299e133":"#0f1118",border:"1px solid "+(isU&&canAfford?"#4299e155":"#1e2535"),color:isU&&canAfford?"#c8d0e0":"#2a3040",borderRadius:3,padding:"4px 7px",cursor:"pointer",fontFamily:"inherit",fontSize:9,opacity:!isU?0.3:!canAfford?0.45:1}}>
+                    onClick={function(){if(off)return;if(!isU){addLog(UNITS[tid].name+" locked.");return;}setSpawnMode(spawnMode===tid?null:tid);setSelected(null);}}
+                    style={{background:spawnMode===tid?"#4299e133":"#0f1118",border:"1px solid "+(isU&&canAfford&&!off?"#4299e155":"#1e2535"),color:isU&&canAfford&&!off?"#c8d0e0":"#2a3040",borderRadius:3,padding:"4px 7px",cursor:off?"not-allowed":"pointer",fontFamily:"inherit",fontSize:9,opacity:off?0.3:!isU?0.3:!canAfford?0.45:1}}>
                     {UNITS[tid].short}<br/><span style={{fontSize:7,color:!canAfford?"#e05252":"#4a5568"}}>{UNITS[tid].cost}pt</span>
                   </button>
                 );})}
               </div>
               <div style={{fontSize:7,color:"#4a5568",letterSpacing:2}}>RANGED</div>
               <div style={{display:"flex",gap:3}}>
-                {[6,7,8].map(function(tid){var isU=unlocked.has(tid);var canAfford=cpPts>=UNITS[tid].cost;return (
+                {[6,7,8].map(function(tid){var isU=unlocked.has(tid);var canAfford=cpPts>=UNITS[tid].cost;var off=!isMyTurn;return (
                   <button key={tid}
                     onMouseEnter={function(e){setBtnTip({typeId:tid,x:e.clientX,y:e.clientY});}}
                     onMouseLeave={function(){setBtnTip(null);}}
-                    onClick={function(){if(!isU){addLog(UNITS[tid].name+" locked.");return;}setSpawnMode(spawnMode===tid?null:tid);setSelected(null);}}
-                    style={{background:spawnMode===tid?"#4299e133":"#0f1118",border:"1px solid "+(isU&&canAfford?"#4299e155":"#1e2535"),color:isU&&canAfford?"#c8d0e0":"#2a3040",borderRadius:3,padding:"4px 7px",cursor:"pointer",fontFamily:"inherit",fontSize:9,opacity:!isU?0.3:!canAfford?0.45:1}}>
+                    onClick={function(){if(off)return;if(!isU){addLog(UNITS[tid].name+" locked.");return;}setSpawnMode(spawnMode===tid?null:tid);setSelected(null);}}
+                    style={{background:spawnMode===tid?"#4299e133":"#0f1118",border:"1px solid "+(isU&&canAfford&&!off?"#4299e155":"#1e2535"),color:isU&&canAfford&&!off?"#c8d0e0":"#2a3040",borderRadius:3,padding:"4px 7px",cursor:off?"not-allowed":"pointer",fontFamily:"inherit",fontSize:9,opacity:off?0.3:!isU?0.3:!canAfford?0.45:1}}>
                     {UNITS[tid].short}<br/><span style={{fontSize:7,color:!canAfford?"#e05252":"#4a5568"}}>{UNITS[tid].cost}pt</span>
                   </button>
                 );})}
@@ -2224,23 +2288,23 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             </div>
             <div style={{width:1,background:"#1e2535",flexShrink:0}}/>
             <div style={{display:"flex",flexDirection:"column",gap:4,justifyContent:"center",flexShrink:0}}>
-              <Btn label="Merge" color="#9f7aea" active={mergeMode} onClick={function(){setMergeMode(!mergeMode);setSelected(null);}}/>
-              <Btn label="Retreat" color="#718096" onClick={doRetreat}/>
-              <Btn label="End Turn" color="#d69e2e" onClick={function(){clearModes();if(endTurnRef.current)endTurnRef.current();}}/>
+              <Btn label="Merge" color="#9f7aea" active={mergeMode} disabled={!isMyTurn} onClick={function(){setMergeMode(!mergeMode);setSelected(null);}}/>
+              <Btn label="Retreat" color="#718096" disabled={!isMyTurn} onClick={doRetreat}/>
+              <Btn label="End Turn" color="#d69e2e" disabled={!isMyTurn} onClick={function(){clearModes();if(endTurnRef.current)endTurnRef.current();}}/>
             </div>
             <div style={{width:1,background:"#1e2535",flexShrink:0}}/>
             <div style={{display:"flex",gap:6,alignItems:"flex-start",flex:1}}>
-              <div onClick={drawSpell} style={{width:52,height:72,flexShrink:0,background:cpPts>=2?"#120820":"#0a0810",border:"2px solid "+(cpPts>=2?"#9f7aea":"#2a1e40"),borderRadius:5,cursor:cpPts>=2?"pointer":"not-allowed",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative",boxShadow:cpPts>=2?"0 0 10px #9f7aea44":"none"}}>
+              <div onClick={isMyTurn?drawSpell:undefined} style={{width:52,height:72,flexShrink:0,background:isMyTurn&&cpPts>=2?"#120820":"#0a0810",border:"2px solid "+(isMyTurn&&cpPts>=2?"#9f7aea":"#2a1e40"),borderRadius:5,cursor:isMyTurn&&cpPts>=2?"pointer":"not-allowed",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative",boxShadow:isMyTurn&&cpPts>=2?"0 0 10px #9f7aea44":"none",opacity:isMyTurn?1:0.4}}>
                 <div style={{position:"absolute",top:3,left:4,fontSize:7,color:"#9f7aea88"}}>✦</div>
                 <div style={{position:"absolute",bottom:3,right:4,fontSize:7,color:"#9f7aea88",transform:"rotate(180deg)"}}>✦</div>
-                <div style={{fontSize:22,color:cpPts>=2?"#c8b4f8":"#4a3870"}}>✦</div>
-                <div style={{fontSize:9,fontWeight:"bold",color:cpPts>=2?"#9f7aea":"#4a3870"}}>SPELL</div>
-                <div style={{fontSize:8,color:cpPts>=2?"#d69e2e":"#4a3870"}}>2pt</div>
+                <div style={{fontSize:22,color:isMyTurn&&cpPts>=2?"#c8b4f8":"#4a3870"}}>✦</div>
+                <div style={{fontSize:9,fontWeight:"bold",color:isMyTurn&&cpPts>=2?"#9f7aea":"#4a3870"}}>SPELL</div>
+                <div style={{fontSize:8,color:isMyTurn&&cpPts>=2?"#d69e2e":"#4a3870"}}>2pt</div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:3,flex:1,maxHeight:80,overflowY:"auto"}}>
                 {(cp==="p1"?p1Hand:p2Hand).map(function(s,i){return (
-                  <div key={i} onClick={function(){if(cpPts<s.cost){addLog(s.name+" costs "+s.cost+"pt.","points");return;}setSelected(null);setCastingSpell(castingSpell===s?null:s);}}
-                    style={{background:castingSpell===s?"#1a1030":"#0f1118",border:"1px solid "+(castingSpell===s?"#9f7aea":"#1e2535"),borderLeft:"3px solid "+(cpPts>=s.cost?"#9f7aea":"#2a2040"),borderRadius:3,padding:"3px 7px",cursor:cpPts>=s.cost?"pointer":"not-allowed",opacity:cpPts>=s.cost?1:0.45}}>
+                  <div key={i} onClick={function(){if(!isMyTurn)return;if(cpPts<s.cost){addLog(s.name+" costs "+s.cost+"pt.","points");return;}setSelected(null);setCastingSpell(castingSpell===s?null:s);}}
+                    style={{background:castingSpell===s?"#1a1030":"#0f1118",border:"1px solid "+(castingSpell===s?"#9f7aea":"#1e2535"),borderLeft:"3px solid "+(isMyTurn&&cpPts>=s.cost?"#9f7aea":"#2a2040"),borderRadius:3,padding:"3px 7px",cursor:isMyTurn&&cpPts>=s.cost?"pointer":"not-allowed",opacity:isMyTurn&&cpPts>=s.cost?1:0.45}}>
                     <div style={{display:"flex",justifyContent:"space-between"}}>
                       <span style={{fontSize:10,color:"#9f7aea",fontWeight:"bold"}}>{s.name}</span>
                       <span style={{fontSize:9,color:"#d69e2e"}}>{s.cost}pt</span>
@@ -2378,6 +2442,6 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   }
 }
 
-function Btn({label,color,onClick,active}) {
-  return <button onClick={onClick} style={{background:active?color+"22":"#0f1118",border:"1px solid "+color+"44",color:color,borderRadius:3,padding:"6px 10px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1,whiteSpace:"nowrap"}}>{label}</button>;
+function Btn({label,color,onClick,active,disabled}) {
+  return <button onClick={disabled?undefined:onClick} disabled={disabled} style={{background:active?color+"22":"#0f1118",border:"1px solid "+(disabled?"#1e2535":color+"44"),color:disabled?"#2a3550":color,borderRadius:3,padding:"6px 10px",cursor:disabled?"not-allowed":"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1,whiteSpace:"nowrap",opacity:disabled?0.4:1}}>{label}</button>;
 }
