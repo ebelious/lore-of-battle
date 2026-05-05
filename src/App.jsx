@@ -4,6 +4,14 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 const BOARD = 7;
 const MAX_HP = 30;
 const MAX_PTS = 6;
+// Returns true if the owner's King (typeId 0) is on their encampment row
+function isKingInEncampment(owner, board) {
+  var encampRow = owner==="p1" ? 0 : BOARD-1;
+  for (var c=0; c<BOARD; c++) {
+    if (board[encampRow][c].some(function(u){return u.typeId===0&&u.owner===owner;})) return true;
+  }
+  return false;
+}
 let UID = 1;
 const uid = () => `u${UID++}`;
 
@@ -1452,6 +1460,17 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   const [selected, setSelected] = useState(null); // {r,c,unitIdx}
   const [log, setLog] = useState([{msg:"Game started!",tag:"default"}]);
   const [winner, setWinner] = useState(null);
+  // Check if life loss should trigger a win — only if king is outside encampment
+  function checkLifeWin(loser, newLife, boardSnap) {
+    if (newLife > 0) return;
+    var kingSafe = isKingInEncampment(loser, boardSnap||board);
+    if (!kingSafe) {
+      setWinner(loser==="p1" ? "P2" : "P1");
+      addLog("♛ "+(loser==="p1"?"P1":"P2")+"'s King is exposed — "+(loser==="p1"?"P2":"P1")+" wins!","death");
+    } else {
+      addLog("♛ "+(loser==="p1"?"P1":"P2")+"'s HP is 0 but King is in the encampment — destroy the King to win!","event");
+    }
+  }
   const [mergeMode, setMergeMode] = useState(false);
   const [spawnMode, setSpawnMode] = useState(null); // typeId
   const [spellMode, setSpellMode] = useState(null);
@@ -1826,8 +1845,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             n[atr][atc][di]={...def,hp:def.hp-dmg};
             if (n[atr][atc][di].hp<=0){
               if (def.typeId!==0){
-                if(def.owner==="p1")setTimeout(function(){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});addLog("♛ P1 loses 1 HP — unit lost to neutral attack!","debuff");},0);
-                else setTimeout(function(){setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});addLog("♛ P2 loses 1 HP — unit lost to neutral attack!","debuff");},0);
+                if(def.owner==="p1")setTimeout(function(){setP1Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p1",nl,null);return nl;});addLog("♛ P1 loses 1 HP — unit lost to neutral attack!","debuff");},0);
+                else setTimeout(function(){setP2Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p2",nl,null);return nl;});addLog("♛ P2 loses 1 HP — unit lost to neutral attack!","debuff");},0);
               }
               n[atr][atc].splice(di,1);
             }
@@ -2173,8 +2192,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     addLog(UNITS[att.typeId].name+" at "+tileName(fr,fc)+" deals "+dmg+" to "+UNITS[def.typeId].name+" at "+tileName(tr,tc)+(counter>0?" (takes "+counter+" back)":"")+".","default");
 
     if (defDied && def.typeId!==0 && !def.neutral) {
-      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;}); addLog("♛ P1 loses 1 HP! (unit destroyed)","debuff"); }
-      else { setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;}); addLog("♛ P2 loses 1 HP! (unit destroyed)","debuff"); }
+      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p1",nl,null);return nl;}); addLog("♛ P1 loses 1 HP! (unit destroyed)","debuff"); }
+      else { setP2Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p2",nl,null);return nl;}); addLog("♛ P2 loses 1 HP! (unit destroyed)","debuff"); }
       addLog(UNITS[def.typeId].name+" destroyed!","death");
     }
     if (defDied && def.typeId===0) {
@@ -2182,8 +2201,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       addLog("★ King destroyed! "+(cp==="p1"?"YOU WIN!":"OPPONENT WINS!"),"death");
     }
     if (def.typeId===0 && !defDied) {
-      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P2");return nl;}); addLog("♛ P1 King takes "+dmg+" damage!","debuff"); }
-      else { setP2Life(function(l){var nl=Math.max(0,l-dmg);if(nl<=0)setWinner("P1");return nl;}); addLog("♛ P2 King takes "+dmg+" damage!","debuff"); }
+      if (def.owner==="p1") { setP1Life(function(l){var nl=Math.max(0,l-dmg);checkLifeWin("p1",nl,null);return nl;}); addLog("♛ P1 King takes "+dmg+" damage!","debuff"); }
+      else { setP2Life(function(l){var nl=Math.max(0,l-dmg);checkLifeWin("p2",nl,null);return nl;}); addLog("♛ P2 King takes "+dmg+" damage!","debuff"); }
     }
 
     // Keep selected for multi-attack
@@ -2291,7 +2310,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         n[row][col].splice(idx,1);
         addLog(UNITS[dead.typeId].name+" destroyed!","death");
         if(dead.neutral){var li=rollLoot(dead.typeId);setGroundItems(function(prev){var dk=row+","+col;var gn={...prev};gn[dk]=[...(prev[dk]||[]),{name:li.name,desc:li.desc,flavor:li.flavor,color:li.color,apply:li.apply}];return gn;});}
-        if(!dead.neutral&&dead.typeId!==0){if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});addLog("♛ P1 loses 1 HP! (unit destroyed by spell)","debuff");}else{setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});addLog("♛ P2 loses 1 HP! (unit destroyed by spell)","debuff");}}
+        if(!dead.neutral&&dead.typeId!==0){if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p1",nl,n);return nl;});addLog("♛ P1 loses 1 HP! (unit destroyed by spell)","debuff");}else{setP2Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p2",nl,n);return nl;});addLog("♛ P2 loses 1 HP! (unit destroyed by spell)","debuff");}}
         if(dead.typeId===0)setWinner(cp==="p1"?"P1":"P2");
         return true;
       }
@@ -2307,8 +2326,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           nb[row][col].forEach(function(dead){
             if(dead.typeId===0){setWinner(dead.owner==="p1"?"P2":"P1");return;}
             if(!dead.neutral&&dead.typeId!==0){
-              if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});}
-              else{setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});}
+              if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p1",nl,nb);return nl;});}
+              else{setP2Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p2",nl,nb);return nl;});}
             }
             addLog(UNITS[dead.typeId]?UNITS[dead.typeId].name:"Unit"+" crushed by blocked tile!","death");
           });
