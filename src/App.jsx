@@ -1456,6 +1456,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   const [spawnMode, setSpawnMode] = useState(null); // typeId
   const [spellMode, setSpellMode] = useState(null);
   const [castingSpell, setCastingSpell] = useState(null);
+  const voidstepRef = useRef(null); // {r,c,unitIdx,unit} pending leap destination
   const [groundItems, setGroundItems] = useState({});
   const [lootPopup, setLootPopup] = useState(null);
   const [attacksUsedMap, setAttacksUsedMap] = useState({});
@@ -2090,7 +2091,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     var defEncamp = (def.owner==="p1"&&tr===0)||(def.owner==="p2"&&tr===6)?1:0;
     const defAtk = UNITS[def.typeId].atk + (def.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (tileEffects[`${tr},${tc}`]?.type==="blessed"?1:tileEffects[`${tr},${tc}`]?.type==="cursed"?-1:0) + defEncamp;
     const isRanged = UNITS[att.typeId].abilities.includes("range");
-    const counter = isRanged ? 0 : Math.max(0,defAtk);
+    const counter = isRanged || att.voidstep ? 0 : Math.max(0,defAtk);
     const dmg = Math.max(0,attAtk);
     var encampHPBonus = defEncamp; // +1 effective HP while in encampment
 
@@ -2114,10 +2115,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     if (att.typeId===3 && attIdxNow>=0 && !attDied && (fr!==tr||fc!==tc) && n[tr][tc].length<4) {
       // Cavalier: remove from source tile and place on target tile
       var cavUnit = n[fr][fc].splice(attIdxNow,1)[0];
-      n[tr][tc].push({...cavUnit,moved:true,tapped:true});
+      n[tr][tc].push({...cavUnit,moved:true,tapped:true,voidstep:false});
     } else if (attIdxNow>=0) {
       // All other units: tap in place
-      n[fr][fc][attIdxNow] = {...n[fr][fc][attIdxNow], tapped:true};
+      n[fr][fc][attIdxNow] = {...n[fr][fc][attIdxNow], tapped:true, voidstep:false};
     }
 
     // Loot drop BEFORE setBoard
@@ -2248,11 +2249,36 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     setSelected({r,c,unitIdx:n[r][c].length-1});
   }
 
-  function clearModes() { setMergeMode(false); setSpawnMode(null); setSpellMode(null); setCastingSpell(null); }
+  function clearModes() { setMergeMode(false); setSpawnMode(null); setSpellMode(null); setCastingSpell(null); voidstepRef.current=null; }
 
   function resolveSpell(r,c,unitIdx) {
     if (!castingSpell) return;
     const {id,cost} = castingSpell;
+
+    // ── Voidstep destination pick ─────────────────────────────────────────────
+    if(id==="voidstep_dest"){
+      var vs=voidstepRef.current;
+      if(!vs){setCastingSpell(null);setSpellMode(null);return;}
+      var n2=cloneBoard(board);
+      // Remove unit from source tile
+      var srcIdx=n2[vs.r][vs.c].findIndex(function(x){return x.id===vs.unit.id;});
+      if(srcIdx<0){addLog("Void Step failed — unit not found.");voidstepRef.current=null;setCastingSpell(null);setSpellMode(null);return;}
+      var leapUnit=n2[vs.r][vs.c].splice(srcIdx,1)[0];
+      // Place on destination (up to 4 units max, can't land on own King)
+      if(n2[r][c].length>=4){addLog("Destination tile is full.");return;}
+      n2[r][c].push({...leapUnit,moved:true,voidstep:true,tapped:false,sick:false});
+      setBoard(n2);
+      // Consume pts and remove from hand
+      var origSpell=vs.spell;
+      setCpPts(function(p){return p-origSpell.cost;});
+      var setHand2=cp==="p1"?setP1Hand:setP2Hand;
+      setHand2(function(h){return h.filter(function(x){return x!==origSpell;});});
+      addLog("Void Step: "+UNITS[leapUnit.typeId].name+" leaps to "+tileName(r,c)+" — no counter damage this turn.","buff");
+      voidstepRef.current=null;
+      setCastingSpell(null);setSpellMode(null);
+      return;
+    }
+
     const n = cloneBoard(board);
     const cell = n[r][c];
     var ui = unitIdx!=null?unitIdx:(cell.length-1);
@@ -2431,7 +2457,13 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       addLog("Mass Rally: all friendly units untapped.","buff");
     } else if(id==="voidstep"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,voidstep:true};addLog("Void Step: "+UNITS[u.typeId].name+" may leap and attack without counter damage.","buff");
+      // Store unit info, switch to destination-picking phase
+      voidstepRef.current={r:r,c:c,unitIdx:ui,unit:u,cost:cost,spell:castingSpell};
+      addLog("Void Step: choose a destination tile for "+UNITS[u.typeId].name+".","buff");
+      // Don't consume pts/hand yet — wait for destination click
+      setCastingSpell({...castingSpell,id:"voidstep_dest",target:"tile"});
+      setSpellMode("voidstep_dest");
+      return; // skip the normal resolveSpell finalization below
     } else if(id==="eagleeye"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
       var ba9=[...(u.bonusAbilities||[]),"range","pierce"];n[r][c][ui]={...u,bonusAbilities:ba9};addLog("Eagle Eye: Range and Pierce granted permanently.","buff");
@@ -2496,7 +2528,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       var cell3=board[r][c];
       if (castingSpell.target==="own") return cell3.some(function(u){return u.owner===cp&&u.typeId!==0;})?"spell_own":null;
       if (castingSpell.target==="enemy") return cell3.some(function(u){return (u.owner!==cp||u.neutral)&&u.typeId!==0;})?"spell_enemy":null;
-      if (castingSpell.target==="tile") return "spell_tile";
+      if (castingSpell.target==="tile"||castingSpell.id==="voidstep_dest") return "spell_tile";
       return null;
     }
     if (!selected) return null;
