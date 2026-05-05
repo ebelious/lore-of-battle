@@ -38,9 +38,11 @@ const ABILITY_DESC = {
 
 function makeUnit(typeId, owner) {
   const def = UNITS[typeId];
+  const isNeutral = owner === "neutral";
+  const baseHp = isNeutral ? def.hp + 3 : def.hp;
   return {
     id: uid(), typeId, owner,
-    hp: def.hp, maxHp: def.hp,
+    hp: baseHp, maxHp: baseHp,
     atkBuff: 0,
     tapped: false,
     moved: false,
