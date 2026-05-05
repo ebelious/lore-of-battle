@@ -731,6 +731,8 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
   var [joinCode, setJoinCode] = React.useState("");
   var [errorMsg, setErrorMsg] = React.useState("");
   var [deckChoice, setDeckChoice] = React.useState(THEME_DECKS[0]);
+  var [oppDeckId, setOppDeckId] = React.useState(null);
+  var [resolvedDeckId, setResolvedDeckId] = React.useState(null);
   var [myRoll, setMyRoll] = React.useState(null);
   var [oppRoll, setOppRoll] = React.useState(null);
   var [isHost, setIsHost] = React.useState(false);
@@ -740,6 +742,9 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
   var myRollRef = React.useRef(null);
   var oppRollRef = React.useRef(null);
   var readyRef = React.useRef(false);
+  var deckChoiceRef = React.useRef(THEME_DECKS[0]);
+  // Keep deckChoiceRef in sync
+  React.useEffect(function(){deckChoiceRef.current=deckChoice;},[deckChoice]);
 
   React.useEffect(function(){
     return function(){
@@ -758,9 +763,16 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
     document.head.appendChild(s);
   }
 
+  function sendDeckChoice(conn){
+    try{conn.send({type:"DECK_CHOICE",deckId:deckChoiceRef.current.id});}catch(e){}
+  }
+
   function attachConnHandlers(conn, hostSide, deckId){
     conn.on("data",function(msg){
       if(!msg)return;
+      if(msg.type==="DECK_CHOICE"){
+        setOppDeckId(msg.deckId);
+      }
       if(msg.type==="DICE_ROLL"){
         oppRollRef.current=msg.roll;
         setOppRoll(msg.roll);
@@ -808,14 +820,28 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
       connRef.current.send({type:"DICE_ROLL",roll:newMine});
       return;
     }
-    // host decides p1First and sends GAME_START to guest
+    // host decides p1First and resolves deck conflict, then sends GAME_START
     if(hostSide){
       var p1First=mine>opp; // host (p1 role) goes first if they rolled higher
-      connRef.current.send({type:"GAME_START",deckId:deckId,p1First:p1First});
-      setStatus("connected");
-      var deck=THEME_DECKS.find(function(d){return d.id===deckId;})||THEME_DECKS[0];
-      readyRef.current=true;
-      setTimeout(function(){onReady(connRef.current,"p1",deck,p1First);},400);
+      // Deck resolution: if decks differ, higher roller's deck wins
+      var finalDeckId=deckId;
+      setOppDeckId(function(oppId){
+        if(oppId&&oppId!==deckId){finalDeckId=p1First?deckId:oppId;}
+        return oppId;
+      });
+      // Use a short timeout to let oppDeckId state settle before sending
+      setTimeout(function(){
+        setOppDeckId(function(oppId){
+          if(oppId&&oppId!==deckId){finalDeckId=p1First?deckId:oppId;}
+          connRef.current.send({type:"GAME_START",deckId:finalDeckId,p1First:p1First});
+          setResolvedDeckId(finalDeckId);
+          setStatus("connected");
+          var deck=THEME_DECKS.find(function(d){return d.id===finalDeckId;})||THEME_DECKS[0];
+          readyRef.current=true;
+          setTimeout(function(){onReady(connRef.current,"p1",deck,p1First);},400);
+          return oppId;
+        });
+      },150);
     }
     // guest waits for GAME_START from host
   }
@@ -827,7 +853,7 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
     myRollRef.current=roll;
     setMyRoll(roll);
     connRef.current.send({type:"DICE_ROLL",roll:roll});
-    checkBothRolled(isHost, isHost?deckChoice.id:null);
+    checkBothRolled(isHost, isHost?deckChoiceRef.current.id:null);
     setRolling(false);
   }
 
@@ -845,9 +871,11 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
             setIsHost(true);
             conn.on("open",function(){
               setMyRoll(null);setOppRoll(null);myRollRef.current=null;oppRollRef.current=null;
+              setOppDeckId(null);setResolvedDeckId(null);
+              sendDeckChoice(conn);
               setStatus("dice");
             });
-            attachConnHandlers(conn,true,deckChoice.id);
+            attachConnHandlers(conn,true,deckChoiceRef.current.id);
           });
         });
         peer.on("error",function(e){setStatus("error");setErrorMsg("Peer error: "+e.message);});
@@ -868,6 +896,8 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
           setIsHost(false);
           conn.on("open",function(){
             setMyRoll(null);setOppRoll(null);myRollRef.current=null;oppRollRef.current=null;
+            setOppDeckId(null);setResolvedDeckId(null);
+            sendDeckChoice(conn);
             setStatus("dice");
           });
           attachConnHandlers(conn,false,null);
@@ -879,6 +909,9 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
 
   var fullRoomCode = peerRef.current&&peerRef.current.id ? peerRef.current.id : "";
   var faces = ["","⚀","⚁","⚂","⚃","⚄","⚅"];
+  var oppDeck = oppDeckId ? THEME_DECKS.find(function(d){return d.id===oppDeckId;}) : null;
+  var decksSame = oppDeckId && oppDeckId===deckChoice.id;
+  var decksDiffer = oppDeckId && oppDeckId!==deckChoice.id;
 
   return (
     <div style={{minHeight:"100vh",background:"#0d0b08",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:"Courier New,monospace",color:"#c8a96e",padding:20,position:"relative"}}>
@@ -924,7 +957,26 @@ function OnlineLobby({ onReady, onBack, lobbyChat }) {
         <button onClick={function(){if(peerRef.current){try{peerRef.current.destroy();}catch(e){}}setStatus("idle");setRoomCode("");}} style={{background:"none",border:"1px solid #c5303044",color:"#c53030",borderRadius:3,padding:"6px 16px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>CANCEL</button>
       </div>}
 
-      {status==="dice"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:20,width:"100%",maxWidth:420}}>
+      {status==="dice"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,width:"100%",maxWidth:440}}>
+        {/* Deck banner */}
+        <div style={{width:"100%",background:"#0d0f1a",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px"}}>
+          <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,marginBottom:10,textAlign:"center"}}>BATTLE DECK SELECTION</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",alignItems:"stretch"}}>
+            <div style={{flex:1,background:deckChoice.color+"18",border:"1px solid "+(deckChoice.color+"55"),borderLeft:"3px solid "+deckChoice.color,borderRadius:3,padding:"8px 10px"}}>
+              <div style={{fontSize:8,color:"#4a5568",letterSpacing:2,marginBottom:3}}>YOU</div>
+              <div style={{fontSize:10,fontWeight:"bold",color:deckChoice.color}}>{deckChoice.name}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",fontSize:12,color:"#2a3550"}}>VS</div>
+            <div style={{flex:1,background:oppDeck?oppDeck.color+"18":"#0a0c14",border:"1px solid "+(oppDeck?oppDeck.color+"55":"#1e2535"),borderLeft:"3px solid "+(oppDeck?oppDeck.color:"#2a3550"),borderRadius:3,padding:"8px 10px"}}>
+              <div style={{fontSize:8,color:"#4a5568",letterSpacing:2,marginBottom:3}}>OPPONENT</div>
+              <div style={{fontSize:10,fontWeight:"bold",color:oppDeck?oppDeck.color:"#2a3550"}}>{oppDeck?oppDeck.name:"Waiting..."}</div>
+            </div>
+          </div>
+          {decksSame&&<div style={{marginTop:8,fontSize:9,color:"#68d391",textAlign:"center",letterSpacing:1}}>✓ Both chose the same deck</div>}
+          {decksDiffer&&!resolvedDeckId&&<div style={{marginTop:8,fontSize:9,color:"#d69e2e",textAlign:"center",letterSpacing:1}}>⚔ Decks differ — higher roll decides</div>}
+          {resolvedDeckId&&<div style={{marginTop:8,fontSize:9,color:"#f6e05e",textAlign:"center",letterSpacing:1}}>★ Playing: {(THEME_DECKS.find(function(d){return d.id===resolvedDeckId;})||deckChoice).name}</div>}
+        </div>
+        {/* Dice roll */}
         <div style={{fontSize:9,color:"#4a3810",letterSpacing:5}}>⚔ WHO STRIKES FIRST ⚔</div>
         <div style={{display:"flex",gap:48,alignItems:"center"}}>
           <div style={{textAlign:"center"}}>
