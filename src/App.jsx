@@ -959,6 +959,7 @@ function LobbyChatPanel({ myRoomCode }) {
   var playersRef = React.useRef({});
   var presenceTimerRef = React.useRef(null);
   var msgScrollRef = React.useRef(null);
+  var sentIdsRef = React.useRef(new Set());
 
   var TOPIC_CHAT = "lore-of-battle/lobby/chat";
   var TOPIC_PRESENCE = "lore-of-battle/lobby/presence";
@@ -1025,6 +1026,7 @@ function LobbyChatPanel({ myRoomCode }) {
             if(topic===TOPIC_CHAT){
               // Only show if public or DM to/from us
               if(msg.to&&msg.to!==nameRef.current&&msg.from!==nameRef.current)return;
+              if(msg._id&&sentIdsRef.current.has(msg._id))return; // skip echo of own message
               setMessages(function(prev){return [...prev.slice(-49),msg];});
             }
           }catch(e){}
@@ -1059,7 +1061,9 @@ function LobbyChatPanel({ myRoomCode }) {
   function sendMsg(){
     var text=msgInput.trim();
     if(!text||!clientRef.current)return;
-    var msg={from:name,to:dmTarget||null,text:text,ts:Date.now()};
+    var msgId=Math.random().toString(36).slice(2);
+    var msg={_id:msgId,from:name,to:dmTarget||null,text:text,ts:Date.now()};
+    sentIdsRef.current.add(msgId);
     try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
     setMessages(function(prev){return [...prev.slice(-49),msg];});
     setMsgInput("");setDmTarget("");
@@ -1067,7 +1071,9 @@ function LobbyChatPanel({ myRoomCode }) {
 
   function sendCode(){
     if(!myRoomCode||!clientRef.current)return;
-    var msg={from:name,to:dmTarget||null,text:"🎮 Room code: "+myRoomCode,ts:Date.now(),isCode:true};
+    var msgId=Math.random().toString(36).slice(2);
+    var msg={_id:msgId,from:name,to:dmTarget||null,text:"🎮 Room code: "+myRoomCode,ts:Date.now(),isCode:true};
+    sentIdsRef.current.add(msgId);
     try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
     setMessages(function(prev){return [...prev.slice(-49),msg];});
   }
@@ -1671,6 +1677,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     setShowEventPopup(true);
     var evSer={id:ev.id,name:ev.name,desc:ev.desc,lore:ev.lore,color:ev.color,cycles:ev.cycles};
     sendOnline({type:"SHOW_EVENT_POPUP",ev:evSer});
+    // Sync board/tile state after event effects (spawn/push/tileFx) have applied
+    setTimeout(function(){sendState();},120);
   }
 
   function startNextCycle() {
@@ -1701,6 +1709,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     setP2Pts(Math.max(0,(firstP==="p2"?pts:secondPts)+bonus2));
     phaseRef.current = firstP; setPhase(firstP);
     addLog(`⚔ ${firstP==="p1"?"Your":"Opponent's"} turn — ${pts}pt. (Cycle ${next})`);
+    setTimeout(function(){sendState();},120);
   }
 
   // ── Neutral AI ───────────────────────────────────────────────────────────────
