@@ -688,6 +688,7 @@ export default function App() {
   const [onlineConn, setOnlineConn] = useState(null);
   const [myOnlineRole, setMyOnlineRole] = useState("p1");
   const [onlineDeck, setOnlineDeck] = useState(null);
+  const lobbyChat = useLobbyChat();
 
   function handleOnlineReady(conn, role, deck, p1First) {
     setOnlineConn(conn);
@@ -699,7 +700,7 @@ export default function App() {
   }
 
   if (screen === "menu")      return <Menu onStart={function(mode){setVsMode(mode);setScreen("deck");}} onSpellBook={function(){setScreen("spellbook");}} onOnline={function(){setScreen("online");}} />;
-  if (screen === "online")    return <OnlineLobby onReady={handleOnlineReady} onBack={function(){setScreen("menu");}} />;
+  if (screen === "online")    return <OnlineLobby onReady={handleOnlineReady} onBack={function(){setScreen("menu");}} lobbyChat={lobbyChat} />;
   if (screen === "spellbook") return <SpellBookSelect current={chosenSpellBook} onConfirm={function(b){setChosenSpellBook(b);saveSpellBook(b);setScreen("menu");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "deck")      return <DeckSelect onConfirm={function(d){setChosenDeck(d);setScreen("dice");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "dice")      return <DiceScreen vsMode={vsMode} onDone={function(p1f){setP1First(p1f);setScreen("game");}} />;
@@ -708,7 +709,7 @@ export default function App() {
 }
 
 // ─── Online Lobby ─────────────────────────────────────────────────────────────
-function OnlineLobby({ onReady, onBack }) {
+function OnlineLobby({ onReady, onBack, lobbyChat }) {
   var [status, setStatus] = React.useState("idle"); // idle | loading | hosting | joining | dice | connected | error
   var [roomCode, setRoomCode] = React.useState("");
   var [joinCode, setJoinCode] = React.useState("");
@@ -887,7 +888,7 @@ function OnlineLobby({ onReady, onBack }) {
           <button onClick={joinGame} disabled={!joinCode.trim()} style={{background:joinCode.trim()?"#063010":"#0a0c14",border:"1px solid "+(joinCode.trim()?"#68d39155":"#1e2535"),color:joinCode.trim()?"#68d391":"#2a3550",borderRadius:3,padding:"10px",cursor:joinCode.trim()?"pointer":"not-allowed",fontFamily:"Courier New,monospace",fontSize:11,letterSpacing:2}}>CONNECT →</button>
         </div>
         {errorMsg&&<div style={{color:"#fc8181",fontSize:10,textAlign:"center",padding:"6px 10px",background:"#1a0808",borderRadius:3,border:"1px solid #c5303033"}}>{errorMsg}</div>}
-        <LobbyChatPanel myRoomCode={fullRoomCode}/>
+        <LobbyChatPanel lobbyChat={lobbyChat} myRoomCode={fullRoomCode}/>
       </div>}
 
       {status==="loading"&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
@@ -903,7 +904,7 @@ function OnlineLobby({ onReady, onBack }) {
           {fullRoomCode&&<button onClick={function(){navigator.clipboard&&navigator.clipboard.writeText(fullRoomCode);}} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"5px 14px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>COPY CODE</button>}
         </div>
         <div style={{fontSize:10,color:"#4a5568",textAlign:"center"}}>Share the code above with your opponent.<br/>They paste it into "Join a Room".</div>
-        <LobbyChatPanel myRoomCode={fullRoomCode}/>
+        <LobbyChatPanel lobbyChat={lobbyChat} myRoomCode={fullRoomCode}/>
         <button onClick={function(){if(peerRef.current){try{peerRef.current.destroy();}catch(e){}}setStatus("idle");setRoomCode("");}} style={{background:"none",border:"1px solid #c5303044",color:"#c53030",borderRadius:3,padding:"6px 16px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>CANCEL</button>
       </div>}
 
@@ -942,149 +943,163 @@ function OnlineLobby({ onReady, onBack }) {
 
 
 // ─── Lobby Chat ───────────────────────────────────────────────────────────────
-// Uses HiveMQ public MQTT broker over WebSocket — no account or setup required
+// MQTT state is hoisted to App so the connection persists across screen changes
 
-function LobbyChatPanel({ myRoomCode }) {
-  var [nameInput, setNameInput] = React.useState(function(){return localStorage.getItem("lobbyName")||"";});
-  var [name, setName] = React.useState("");
-  var [joined, setJoined] = React.useState(false);
-  var [players, setPlayers] = React.useState([]);
-  var [messages, setMessages] = React.useState([]);
-  var [msgInput, setMsgInput] = React.useState("");
-  var [dmTarget, setDmTarget] = React.useState("");
-  var [connState, setConnState] = React.useState("idle"); // idle | connecting | connected | error
+var _lobbyChatSingleton = null; // module-level singleton so App re-renders don't recreate it
+
+function useLobbyChat() {
+  var [chatState, setChatState] = React.useState(function(){
+    return _lobbyChatSingleton || {connState:"idle",name:"",nameInput:localStorage.getItem("lobbyName")||"",players:[],messages:[],dmTarget:""};
+  });
+  var stateRef = React.useRef(chatState);
+  stateRef.current = chatState;
+
   var clientRef = React.useRef(null);
   var myIdRef = React.useRef(null);
-  var nameRef = React.useRef("");
   var playersRef = React.useRef({});
   var presenceTimerRef = React.useRef(null);
-  var msgScrollRef = React.useRef(null);
   var sentIdsRef = React.useRef(new Set());
 
   var TOPIC_CHAT = "lore-of-battle/lobby/chat";
   var TOPIC_PRESENCE = "lore-of-battle/lobby/presence";
 
+  function patchState(patch){ setChatState(function(prev){var next={...prev,...patch};_lobbyChatSingleton=next;return next;}); }
+
   function loadMqtt(cb){
     if(window.mqtt){cb();return;}
     var s=document.createElement("script");
-    s.src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js";
-    s.onload=function(){cb();};
-    s.onerror=function(){setConnState("error");};
+    s.src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js";
+    s.onload=function(){setTimeout(cb,50);};
+    s.onerror=function(){patchState({connState:"error"});};
     document.head.appendChild(s);
   }
 
-  function joinLobby(){
-    var n=nameInput.trim();
-    if(!n)return;
+  function joinLobby(n){
+    if(!n||!n.trim())return;
+    n=n.trim();
     localStorage.setItem("lobbyName",n);
-    setName(n);nameRef.current=n;
     myIdRef.current="p_"+Math.random().toString(36).slice(2,8);
-    setConnState("connecting");
+    patchState({connState:"connecting",name:n});
+
     loadMqtt(function(){
-      var mqttLib=window.mqtt||window.Mqtt;
-      if(!mqttLib){setConnState("error");return;}
-      try{
-        var client=mqttLib.connect("wss://test.mosquitto.org:8081",{
-          clientId:"lob_"+Math.random().toString(36).slice(2,10),
-          reconnectPeriod:0,
-          connectTimeout:8000,
-          keepalive:30,
-        });
-        clientRef.current=client;
-        client.on("connect",function(){
-          setConnState("connected");
-          setJoined(true);
-          client.subscribe(TOPIC_CHAT);
-          client.subscribe(TOPIC_PRESENCE);
-          publishPresence(client,n,true);
-          // Heartbeat every 8s
-          presenceTimerRef.current=setInterval(function(){
-            publishPresence(client,nameRef.current,true);
-            // Prune stale players
-            var now=Date.now();
-            var active={};
-            Object.entries(playersRef.current).forEach(function(e){if(now-e[1].ts<20000)active[e[0]]=e[1];});
-            playersRef.current=active;
-            setPlayers(Object.values(active));
-          },8000);
-        });
-        client.on("message",function(topic,payload){
-          try{
-            var msg=JSON.parse(payload.toString());
-            if(topic===TOPIC_PRESENCE){
-              if(msg.id===myIdRef.current)return;
-              if(msg.online){
-                playersRef.current[msg.id]={name:msg.name,ts:Date.now()};
-                setPlayers(Object.values(playersRef.current));
-                // Respond so new joiners see us
-                if(clientRef.current)publishPresence(clientRef.current,nameRef.current,true);
-              } else {
-                delete playersRef.current[msg.id];
-                setPlayers(Object.values(playersRef.current));
+      var mqttLib=window.mqtt;
+      if(!mqttLib||typeof mqttLib.connect!=="function"){patchState({connState:"error"});return;}
+      // Try EMQX public broker (reliable WSS, no cert issues)
+      var brokers=["wss://broker.emqx.io:8084/mqtt","wss://broker.hivemq.com:8884/mqtt"];
+      var bi=0;
+      function tryBroker(){
+        if(bi>=brokers.length){patchState({connState:"error"});return;}
+        var url=brokers[bi++];
+        try{
+          if(clientRef.current){try{clientRef.current.end(true);}catch(e){}}
+          var client=mqttLib.connect(url,{
+            clientId:"lob_"+Math.random().toString(36).slice(2,10),
+            reconnectPeriod:0,
+            connectTimeout:6000,
+            keepalive:25,
+          });
+          clientRef.current=client;
+          var didConnect=false;
+          var timeout=setTimeout(function(){if(!didConnect){client.end(true);tryBroker();}},7000);
+          client.on("connect",function(){
+            didConnect=true;clearTimeout(timeout);
+            patchState({connState:"connected"});
+            client.subscribe(TOPIC_CHAT);
+            client.subscribe(TOPIC_PRESENCE);
+            publishPresence(client,n,true);
+            clearInterval(presenceTimerRef.current);
+            presenceTimerRef.current=setInterval(function(){
+              publishPresence(client,stateRef.current.name,true);
+              var now=Date.now();
+              var active={};
+              Object.entries(playersRef.current).forEach(function(e){if(now-e[1].ts<25000)active[e[0]]=e[1];});
+              playersRef.current=active;
+              patchState({players:Object.values(active)});
+            },8000);
+          });
+          client.on("message",function(topic,payload){
+            try{
+              var msg=JSON.parse(payload.toString());
+              if(topic===TOPIC_PRESENCE){
+                if(msg.id===myIdRef.current)return;
+                if(msg.online){
+                  playersRef.current[msg.id]={name:msg.name,ts:Date.now()};
+                  patchState({players:Object.values(playersRef.current)});
+                  if(clientRef.current)publishPresence(clientRef.current,stateRef.current.name,true);
+                } else {
+                  delete playersRef.current[msg.id];
+                  patchState({players:Object.values(playersRef.current)});
+                }
               }
-            }
-            if(topic===TOPIC_CHAT){
-              // Only show if public or DM to/from us
-              if(msg.to&&msg.to!==nameRef.current&&msg.from!==nameRef.current)return;
-              if(msg._id&&sentIdsRef.current.has(msg._id))return; // skip echo of own message
-              setMessages(function(prev){return [...prev.slice(-49),msg];});
-            }
-          }catch(e){}
-        });
-        client.on("error",function(){setConnState("error");});
-        client.on("offline",function(){setConnState("error");});
-      }catch(e){setConnState("error");}
+              if(topic===TOPIC_CHAT){
+                if(msg.to&&msg.to!==stateRef.current.name&&msg.from!==stateRef.current.name)return;
+                if(msg._id&&sentIdsRef.current.has(msg._id))return;
+                patchState({messages:[...stateRef.current.messages.slice(-49),msg]});
+              }
+            }catch(e){}
+          });
+          client.on("error",function(){});
+          client.on("close",function(){if(didConnect){patchState({connState:"idle"});}});
+        }catch(e){tryBroker();}
+      }
+      tryBroker();
     });
+  }
+
+  function leaveLobby(){
+    clearInterval(presenceTimerRef.current);
+    if(clientRef.current){
+      try{publishPresence(clientRef.current,stateRef.current.name,false);}catch(e){}
+      try{clientRef.current.end(true);}catch(e){}
+      clientRef.current=null;
+    }
+    playersRef.current={};
+    _lobbyChatSingleton=null;
+    patchState({connState:"idle",name:"",players:[],messages:[],dmTarget:""});
   }
 
   function publishPresence(client,n,online){
     try{client.publish(TOPIC_PRESENCE,JSON.stringify({id:myIdRef.current,name:n,online:online}),{qos:0,retain:false});}catch(e){}
   }
 
-  function leaveLobby(){
-    clearInterval(presenceTimerRef.current);
-    if(clientRef.current){
-      try{publishPresence(clientRef.current,nameRef.current,false);}catch(e){}
-      try{clientRef.current.end(true);}catch(e){}
-      clientRef.current=null;
-    }
-    playersRef.current={};
-    setJoined(false);setPlayers([]);setMessages([]);setConnState("idle");
+  function sendMsg(text,dmTarget){
+    if(!text||!clientRef.current)return;
+    var msgId=Math.random().toString(36).slice(2);
+    var msg={_id:msgId,from:stateRef.current.name,to:dmTarget||null,text:text,ts:Date.now()};
+    sentIdsRef.current.add(msgId);
+    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
+    patchState({messages:[...stateRef.current.messages.slice(-49),msg]});
   }
 
-  React.useEffect(function(){return function(){leaveLobby();};},[]); // eslint-disable-line
+  function sendCode(myRoomCode,dmTarget){
+    if(!myRoomCode||!clientRef.current)return;
+    var msgId=Math.random().toString(36).slice(2);
+    var msg={_id:msgId,from:stateRef.current.name,to:dmTarget||null,text:"🎮 Room code: "+myRoomCode,ts:Date.now(),isCode:true};
+    sentIdsRef.current.add(msgId);
+    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
+    patchState({messages:[...stateRef.current.messages.slice(-49),msg]});
+  }
+
+  return {chatState, patchState, joinLobby, leaveLobby, sendMsg, sendCode};
+}
+
+function LobbyChatPanel({ lobbyChat, myRoomCode }) {
+  var {chatState, patchState, joinLobby, leaveLobby, sendMsg, sendCode} = lobbyChat;
+  var {connState, name, nameInput, players, messages, dmTarget} = chatState;
+  var msgScrollRef = React.useRef(null);
+  var [msgInput, setMsgInput] = React.useState("");
 
   React.useEffect(function(){
     if(msgScrollRef.current)msgScrollRef.current.scrollTop=msgScrollRef.current.scrollHeight;
   },[messages]);
 
-  function sendMsg(){
-    var text=msgInput.trim();
-    if(!text||!clientRef.current)return;
-    var msgId=Math.random().toString(36).slice(2);
-    var msg={_id:msgId,from:name,to:dmTarget||null,text:text,ts:Date.now()};
-    sentIdsRef.current.add(msgId);
-    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
-    setMessages(function(prev){return [...prev.slice(-49),msg];});
-    setMsgInput("");setDmTarget("");
-  }
-
-  function sendCode(){
-    if(!myRoomCode||!clientRef.current)return;
-    var msgId=Math.random().toString(36).slice(2);
-    var msg={_id:msgId,from:name,to:dmTarget||null,text:"🎮 Room code: "+myRoomCode,ts:Date.now(),isCode:true};
-    sentIdsRef.current.add(msgId);
-    try{clientRef.current.publish(TOPIC_CHAT,JSON.stringify(msg));}catch(e){}
-    setMessages(function(prev){return [...prev.slice(-49),msg];});
-  }
-
-  if(!joined) return (
+  if(connState==="idle"||connState==="connecting"||connState==="error") return (
     <div style={{background:"#0a0e18",border:"1px solid #1e2535",borderRadius:4,padding:"12px 16px",width:"100%",boxSizing:"border-box"}}>
       <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,marginBottom:8}}>LOBBY CHAT</div>
-      {connState==="error"&&<div style={{fontSize:9,color:"#fc8181",marginBottom:6}}>Connection failed. Check your internet.</div>}
+      {connState==="error"&&<div style={{fontSize:9,color:"#fc8181",marginBottom:6}}>Connection failed — retrying next broker...</div>}
       <div style={{display:"flex",gap:6}}>
-        <input value={nameInput} onChange={function(e){setNameInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")joinLobby();}} placeholder="Enter your name..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"6px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
-        <button onClick={joinLobby} disabled={connState==="connecting"} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"6px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1,opacity:connState==="connecting"?0.5:1}}>{connState==="connecting"?"...":"JOIN"}</button>
+        <input value={nameInput} onChange={function(e){patchState({nameInput:e.target.value});}} onKeyDown={function(e){if(e.key==="Enter")joinLobby(nameInput);}} placeholder="Enter your name..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"6px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
+        <button onClick={function(){joinLobby(nameInput);}} disabled={connState==="connecting"} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"6px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1,opacity:connState==="connecting"?0.5:1}}>{connState==="connecting"?"...":"JOIN"}</button>
       </div>
     </div>
   );
@@ -1094,42 +1109,36 @@ function LobbyChatPanel({ myRoomCode }) {
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{fontSize:9,color:"#4a5568",letterSpacing:3}}>LOBBY CHAT</div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <span style={{fontSize:9,color:connState==="connected"?"#68d391":"#718096"}}>● {name}</span>
+          <span style={{fontSize:9,color:"#68d391"}}>● {name}</span>
           <button onClick={leaveLobby} style={{background:"none",border:"none",color:"#4a5568",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8}}>LEAVE</button>
         </div>
       </div>
       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
         <button style={{background:"#0d0f1a",border:"1px solid #1e2535",color:"#68d391",borderRadius:10,padding:"2px 8px",fontFamily:"Courier New,monospace",fontSize:9,cursor:"default"}}>● {name} (you)</button>
-        {players.map(function(p,i){
-          var isSel=dmTarget===p.name;
-          return(
-            <button key={i} onClick={function(){setDmTarget(isSel?"":p.name);}}
-              style={{background:isSel?"#4299e122":"#0d0f1a",border:"1px solid "+(isSel?"#4299e1":"#1e2535"),color:isSel?"#4299e1":"#a0adb8",borderRadius:10,padding:"2px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>
-              ● {p.name}
-            </button>
-          );
-        })}
+        {players.map(function(p,i){var isSel=dmTarget===p.name;return(
+          <button key={i} onClick={function(){patchState({dmTarget:isSel?"":p.name});}}
+            style={{background:isSel?"#4299e122":"#0d0f1a",border:"1px solid "+(isSel?"#4299e1":"#1e2535"),color:isSel?"#4299e1":"#a0adb8",borderRadius:10,padding:"2px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>
+            ● {p.name}
+          </button>
+        );})}
         {players.length===0&&<span style={{fontSize:9,color:"#2a3550"}}>No one else online yet</span>}
       </div>
       <div ref={msgScrollRef} style={{overflowY:"auto",maxHeight:120,display:"flex",flexDirection:"column",gap:3,background:"#060810",borderRadius:3,padding:"6px 8px"}}>
         {messages.length===0&&<div style={{fontSize:9,color:"#2a3550"}}>No messages yet</div>}
-        {messages.map(function(m,i){
-          var isMine=m.from===name;
-          return(
-            <div key={i} style={{fontSize:9,color:m.isCode?"#f6e05e":m.to?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5}}>
-              <span style={{color:isMine?"#4299e1":"#68d391",fontWeight:"bold"}}>{m.from}</span>
-              {m.to&&<span style={{color:"#b794f4"}}> → {m.to}</span>}
-              <span style={{color:"#2a3550"}}> · </span>{m.text}
-            </div>
-          );
-        })}
+        {messages.map(function(m,i){var isMine=m.from===name;return(
+          <div key={i} style={{fontSize:9,color:m.isCode?"#f6e05e":m.to?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5}}>
+            <span style={{color:isMine?"#4299e1":"#68d391",fontWeight:"bold"}}>{m.from}</span>
+            {m.to&&<span style={{color:"#b794f4"}}> → {m.to}</span>}
+            <span style={{color:"#2a3550"}}> · </span>{m.text}
+          </div>
+        );})}
       </div>
       <div style={{display:"flex",gap:4,flexDirection:"column"}}>
-        {dmTarget&&<div style={{fontSize:8,color:"#b794f4",letterSpacing:1}}>DM → {dmTarget} <button onClick={function(){setDmTarget("");}} style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>✕</button></div>}
+        {dmTarget&&<div style={{fontSize:8,color:"#b794f4",letterSpacing:1}}>DM → {dmTarget} <button onClick={function(){patchState({dmTarget:""}); }} style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>✕</button></div>}
         <div style={{display:"flex",gap:4}}>
-          <input value={msgInput} onChange={function(e){setMsgInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")sendMsg();}} placeholder={dmTarget?"Message "+dmTarget+"...":"Message everyone..."} style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"5px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
-          <button onClick={sendMsg} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>SEND</button>
-          {myRoomCode&&<button onClick={sendCode} style={{background:"#d69e2e22",border:"1px solid #d69e2e44",color:"#d69e2e",borderRadius:3,padding:"5px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>SEND CODE</button>}
+          <input value={msgInput} onChange={function(e){setMsgInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter"){sendMsg(msgInput,dmTarget);setMsgInput("");patchState({dmTarget:""});}}} placeholder={dmTarget?"Message "+dmTarget+"...":"Message everyone..."} style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"5px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
+          <button onClick={function(){sendMsg(msgInput,dmTarget);setMsgInput("");patchState({dmTarget:""}); }} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>SEND</button>
+          {myRoomCode&&<button onClick={function(){sendCode(myRoomCode,dmTarget);}} style={{background:"#d69e2e22",border:"1px solid #d69e2e44",color:"#d69e2e",borderRadius:3,padding:"5px 8px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>SEND CODE</button>}
         </div>
       </div>
     </div>
