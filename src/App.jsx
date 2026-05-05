@@ -1668,7 +1668,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         const left = eventCyclesRef.current - 1;
         if (left <= 0) {
           addLog('"'+cur.name+'" has ended.','event');
-          if(cur.tileFx){setTileEffects({});addLog("✦ Tile effects cleared.","default");}
+          var endedTileFx=cur.tileFx||null;
+          if(endedTileFx){setTileEffects(function(prev){var nx={...prev};Object.keys(nx).forEach(function(k){if(nx[k].type===endedTileFx)delete nx[k];});return nx;});addLog("✦ "+endedTileFx+" tiles cleared.","default");}
           setActiveEvent(null); activeEventRef.current = null;
           setEventCyclesLeft(0); eventCyclesRef.current = 0;
           setP1MaxPts(MAX_PTS); setP2MaxPts(MAX_PTS);
@@ -2132,13 +2133,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           }
           if(!stillAlive){
             addLog("⚡ All "+def.label+"s defeated — event ends early!","event");
+            var earlyTileFx=activeEventRef.current&&activeEventRef.current.tileFx||null;
             setActiveEvent(null);activeEventRef.current=null;
             setEventCyclesLeft(0);eventCyclesRef.current=0;
-            setTileEffects(function(prev){
-              var nx={...prev};
-              Object.keys(nx).forEach(function(k){if(nx[k].type===activeEventRef.current?.tileFx)delete nx[k];});
-              return nx;
-            });
+            if(earlyTileFx){setTileEffects(function(prev){var nx={...prev};Object.keys(nx).forEach(function(k){if(nx[k].type===earlyTileFx)delete nx[k];});return nx;});}
           }
           return latest;
         });
