@@ -1506,6 +1506,13 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     return function(){clearTimeout(t);};
   },[phase,cycleNum,winner]);
 
+  // Also sync whenever pts or life change — ensures event bonuses reach the peer
+  useEffect(function(){
+    if(!isOnline)return;
+    var t=setTimeout(function(){sendState();},60);
+    return function(){clearTimeout(t);};
+  },[p1Pts,p2Pts,p1Life,p2Life]);
+
   function endTurn() {
     // Clear moved flags for current player
     setBoard(prev => prev.map(row => row.map(cell =>
