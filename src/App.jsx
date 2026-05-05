@@ -12,12 +12,12 @@ const UNITS = {
   0: { name:"King",        short:"K",   atk:3, hp:30, cost:0,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["armor"],                      mergeTo:null, life:0  },
   1: { name:"Soldier",     short:"SOL", atk:1, hp:2,  cost:1,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["charge"],                     mergeTo:2,    life:1  },
   2: { name:"Knight",      short:"KNT", atk:2, hp:3,  cost:4,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["armor","fallback"],           mergeTo:3,    life:1  },
-  3: { name:"Cavalier",    short:"CAV", atk:3, hp:3,  cost:5,  movDist:2, movShape:"cross", atkShape:"lshape_same",   abilities:["armor","fallback"],           mergeTo:4,    life:1  },
+  3: { name:"Cavalier",    short:"CAV", atk:4, hp:4,  cost:5,  movDist:2, movShape:"cross", atkShape:"lshape_same",   abilities:["armor","fallback"],           mergeTo:4,    life:1  },
   4: { name:"General",     short:"GEN", atk:5, hp:5,  cost:6,  movDist:2, movShape:"cross", atkShape:"adjacent", abilities:["armor","charge","fallback"],  mergeTo:null, life:1  },
   5: { name:"Tower",       short:"TWR", atk:4, hp:8,  cost:6,  movDist:0, movShape:"none",  atkShape:"ring2",    abilities:["armor","range","pierce","immovable"], mergeTo:null, life:1 },
   6: { name:"Archer",      short:"ARC", atk:1, hp:1,  cost:1,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","fallback"],           mergeTo:7,    life:1  },
   7: { name:"Crossbowman", short:"XBW", atk:2, hp:2,  cost:4,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","pierce"],             mergeTo:8,    life:1  },
-  8: { name:"Ballista",    short:"BAL", atk:4, hp:3,  cost:5,  movDist:1, movShape:"cross", atkShape:"ballista", abilities:["range","pierce"],              mergeTo:5,    life:1  },
+  8: { name:"Ballista",    short:"BAL", atk:3, hp:5,  cost:5,  movDist:1, movShape:"cross", atkShape:"ballista", abilities:["range","pierce"],              mergeTo:5,    life:1  },
 };
 const MERGE_REQ = { 1:2, 2:3, 3:4, 6:2, 7:3, 8:4 };
 const MERGE_COST = { 1:4, 2:4, 3:5, 6:4, 7:4, 8:6 };
@@ -451,14 +451,20 @@ function UnitTip({u,x,y,board,tileEffects,evFx}) {
       {(evFx.atkBonus||evFx.atkMalus||evFx.hpBonus||tileBuff!==0)&&(
         <div style={{background:"#0d1520",border:"1px solid #1e3050",borderRadius:3,padding:"4px 8px",marginBottom:4,fontSize:10}}>
           <div style={{fontSize:8,color:"#4a5568",letterSpacing:2,marginBottom:2}}>ACTIVE EFFECTS</div>
-          {evFx.atkBonus>0&&<div style={{color:"#68d391"}}>Event: +{evFx.atkBonus} ATK</div>}
-          {evFx.atkMalus<0&&<div style={{color:"#fc8181"}}>Event: {evFx.atkMalus} ATK</div>}
-          {evFx.hpBonus>0&&<div style={{color:"#68d391"}}>Event: +{evFx.hpBonus} HP</div>}
+          {evFx.atkBonus>0&&<div style={{color:"#68d391"}}>⚡ Event: +{evFx.atkBonus} ATK</div>}
+          {evFx.atkMalus<0&&<div style={{color:"#fc8181"}}>⚡ Event: {evFx.atkMalus} ATK</div>}
+          {evFx.hpBonus>0&&<div style={{color:"#68d391"}}>⚡ Event: +{evFx.hpBonus} HP</div>}
           {tileBuff>0&&<div style={{color:"#68d391"}}>Tile: +1 ATK (blessed)</div>}
           {encampBonus>0&&<div style={{color:"#4299e1",fontWeight:"bold",background:"#0a1020",borderRadius:2,padding:"2px 5px",marginTop:2}}>🏰 ENCAMPMENT BONUS ACTIVE — +1 ATK, +1 HP</div>}
           {tileBuff<0&&<div style={{color:"#9f7aea"}}>Tile: -1 ATK (cursed)</div>}
           {ute&&ute.type==="fire"&&<div style={{color:"#fc8181"}}>Tile: fire — 1 dmg/cycle</div>}
           {ute&&ute.type==="ice"&&<div style={{color:"#63b3ed"}}>Tile: ice — frozen after move</div>}
+        </div>
+      )}
+      {u.spellFx&&u.spellFx.length>0&&(
+        <div style={{background:"#120820",border:"1px solid #b794f433",borderRadius:3,padding:"4px 8px",marginBottom:4,fontSize:10}}>
+          <div style={{fontSize:8,color:"#b794f488",letterSpacing:2,marginBottom:2}}>✦ SPELL EFFECTS</div>
+          {u.spellFx.map(function(fx,i){return <div key={i} style={{color:"#b794f4"}}>✦ {fx}</div>;})}
         </div>
       )}
       {allAbils.length>0&&<div style={{marginBottom:5}}>{allAbils.map(function(a,i){var base=a.replace("*","");var isBonus=a.slice(-1)==="*";return <div key={i} style={{fontSize:9,color:isBonus?"#f6e05e":"#b794f4",background:isBonus?"#1a1500":"#1a1030",borderRadius:2,padding:"2px 5px",marginBottom:2}}>{isBonus?"★ ":""}<b>{base.toUpperCase()}</b></div>;})}</div>}
@@ -704,7 +710,7 @@ export default function App() {
   if (screen === "spellbook") return <SpellBookSelect current={chosenSpellBook} onConfirm={function(b){setChosenSpellBook(b);saveSpellBook(b);setScreen("menu");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "deck")      return <DeckSelect onConfirm={function(d){setChosenDeck(d);setScreen("dice");}} onBack={function(){setScreen("menu");}} />;
   if (screen === "dice")      return <DiceScreen vsMode={vsMode} onDone={function(p1f){setP1First(p1f);setScreen("game");}} />;
-  if (screen === "game")      return <Game vsMode={vsMode} p1First={p1First} chosenDeck={vsMode==="online"?onlineDeck:chosenDeck} chosenSpellBook={chosenSpellBook} onlineConn={vsMode==="online"?onlineConn:null} myOnlineRole={vsMode==="online"?myOnlineRole:null} onMenu={function(){if(onlineConn){try{onlineConn.close();}catch(e){}setOnlineConn(null);}setScreen("menu");}} />;
+  if (screen === "game")      return <Game vsMode={vsMode} p1First={p1First} chosenDeck={vsMode==="online"?onlineDeck:chosenDeck} chosenSpellBook={chosenSpellBook} onlineConn={vsMode==="online"?onlineConn:null} myOnlineRole={vsMode==="online"?myOnlineRole:null} lobbyChat={vsMode==="online"?lobbyChat:null} onMenu={function(){if(onlineConn){try{onlineConn.close();}catch(e){}setOnlineConn(null);}setScreen("menu");}} />;
   return null;
 }
 
@@ -1145,6 +1151,70 @@ function LobbyChatPanel({ lobbyChat, myRoomCode }) {
   );
 }
 
+function InGameChatPanel({ lobbyChat }) {
+  var {chatState, patchState, sendMsg, sendCode} = lobbyChat;
+  var {connState, name, players, messages, dmTarget} = chatState;
+  var [open, setOpen] = React.useState(false);
+  var [msgInput, setMsgInput] = React.useState("");
+  var msgScrollRef = React.useRef(null);
+  var [unread, setUnread] = React.useState(0);
+
+  React.useEffect(function(){
+    if(open){setUnread(0);}
+  },[open]);
+
+  React.useEffect(function(){
+    if(!open&&messages.length>0){setUnread(function(n){return n+1;});}
+    if(open&&msgScrollRef.current)msgScrollRef.current.scrollTop=msgScrollRef.current.scrollHeight;
+  },[messages]);
+
+  var connected = connState==="connected";
+  var width = open ? 220 : 36;
+
+  return (
+    <div style={{width:width,flexShrink:0,background:"#0a0c12",borderRight:"1px solid #1e2535",display:"flex",flexDirection:"column",transition:"width 0.2s ease",overflow:"hidden",height:"100vh",position:"relative"}}>
+      {/* Toggle button */}
+      <button onClick={function(){setOpen(!open);if(!open)setUnread(0);}} style={{flexShrink:0,background:"none",border:"none",borderBottom:"1px solid #1e2535",color:connected?"#4299e1":"#4a5568",cursor:"pointer",padding:"10px 0",fontFamily:"Courier New,monospace",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",gap:4,position:"relative"}}>
+        {open?"◀":"▶"}
+        {!open&&<span style={{fontSize:8,writingMode:"vertical-rl",textOrientation:"mixed",color:"#4a5568",marginTop:4}}>CHAT</span>}
+        {!open&&unread>0&&<div style={{position:"absolute",top:6,right:6,background:"#4299e1",borderRadius:"50%",width:14,height:14,fontSize:8,color:"#000",display:"flex",alignItems:"center",justifyContent:"center"}}>{unread>9?"9+":unread}</div>}
+      </button>
+      {open&&<div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0,padding:"8px 8px 6px"}}>
+        <div style={{fontSize:8,color:"#4a5568",letterSpacing:2,marginBottom:6}}>{connected?"● LOBBY CHAT":"NOT CONNECTED"}</div>
+        {/* Players online */}
+        <div style={{display:"flex",flexDirection:"column",gap:2,marginBottom:6}}>
+          {name&&<div style={{fontSize:8,color:"#68d391"}}>● {name} (you)</div>}
+          {players.map(function(p,i){var isSel=dmTarget===p.name;return(
+            <button key={i} onClick={function(){patchState({dmTarget:isSel?"":p.name});}}
+              style={{background:isSel?"#4299e122":"none",border:"none",color:isSel?"#4299e1":"#718096",fontFamily:"Courier New,monospace",fontSize:8,textAlign:"left",cursor:"pointer",padding:"1px 0",borderRadius:2}}>
+              ● {p.name}
+            </button>
+          );})}
+          {connected&&players.length===0&&<div style={{fontSize:8,color:"#2a3550"}}>No others online</div>}
+        </div>
+        {/* Messages */}
+        <div ref={msgScrollRef} style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:2,background:"#060810",borderRadius:3,padding:"4px 6px",marginBottom:6,minHeight:0}}>
+          {messages.length===0&&<div style={{fontSize:8,color:"#2a3550"}}>No messages</div>}
+          {messages.map(function(m,i){var isMine=m.from===name;return(
+            <div key={i} style={{fontSize:8,color:m.isCode?"#f6e05e":m.to?"#b794f4":isMine?"#c8d0e0":"#718096",lineHeight:1.5,wordBreak:"break-word"}}>
+              <span style={{color:isMine?"#4299e1":"#68d391",fontWeight:"bold"}}>{m.from}</span>
+              {m.to&&<span style={{color:"#b794f4"}}>→{m.to}</span>}
+              <span style={{color:"#2a3550"}}> </span>{m.text}
+            </div>
+          );})}
+        </div>
+        {/* DM indicator */}
+        {dmTarget&&<div style={{fontSize:8,color:"#b794f4",marginBottom:3}}>→ {dmTarget} <button onClick={function(){patchState({dmTarget:""}); }} style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8}}>✕</button></div>}
+        {/* Input */}
+        <div style={{display:"flex",gap:3}}>
+          <input value={msgInput} onChange={function(e){setMsgInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter"&&msgInput.trim()){sendMsg(msgInput.trim(),dmTarget);setMsgInput("");patchState({dmTarget:""});}}} placeholder="..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"3px 5px",fontFamily:"Courier New,monospace",fontSize:9,outline:"none",minWidth:0}}/>
+          <button onClick={function(){if(msgInput.trim()){sendMsg(msgInput.trim(),dmTarget);setMsgInput("");patchState({dmTarget:""});}}} style={{background:"#4299e122",border:"1px solid #4299e144",color:"#4299e1",borderRadius:3,padding:"3px 6px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>↑</button>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 function SpellBookSelect({current, onConfirm, onBack}) {
   var saved=loadSavedSpellBook();
   var [book,setBook]=React.useState(current&&current.length?current:(saved||[]));
@@ -1336,7 +1406,7 @@ function DiceScreen({ vsMode, onDone }) {
 }
 
 // ─── Main Game Component ──────────────────────────────────────────────────────
-function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn, myOnlineRole }) {
+function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn, myOnlineRole, lobbyChat }) {
   var deck = chosenDeck || THEME_DECKS[0];
   var spellBook = (chosenSpellBook&&chosenSpellBook.length) ? chosenSpellBook : makeRandomSpellBook();
   var isOnline = vsMode==="online" && !!onlineConn;
@@ -2052,6 +2122,26 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
     // Loot drop BEFORE setBoard
     if (defDied && def.neutral) {
+      // Check if this was an event-spawned unit and all of its kind are now gone
+      if(def.label&&activeEventRef.current&&activeEventRef.current.spawn&&activeEventRef.current.spawn.label===def.label){
+        setBoard(function(latest){
+          var stillAlive=false;
+          for(var er=0;er<BOARD&&!stillAlive;er++)for(var ec=0;ec<BOARD&&!stillAlive;ec++){
+            if(latest[er][ec].some(function(u){return u.neutral&&u.label===def.label;}))stillAlive=true;
+          }
+          if(!stillAlive){
+            addLog("⚡ All "+def.label+"s defeated — event ends early!","event");
+            setActiveEvent(null);activeEventRef.current=null;
+            setEventCyclesLeft(0);eventCyclesRef.current=0;
+            setTileEffects(function(prev){
+              var nx={...prev};
+              Object.keys(nx).forEach(function(k){if(nx[k].type===activeEventRef.current?.tileFx)delete nx[k];});
+              return nx;
+            });
+          }
+          return latest;
+        });
+      }
       var lootItem=rollLoot(def.typeId);
       var attOnSameTile = !attDied && fr===tr && fc===tc && n[tr][tc].findIndex(function(x){return x.id===att.id;})>=0;
       if (attOnSameTile) {
@@ -2186,6 +2276,22 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     // helper: set tile effect
     function setTE(row,col,type,cycles){
       setTileEffects(function(prev){var k=row+","+col;return {...prev,[k]:{type:type,turnsLeft:cycles*2+1}};});
+      if(type==="blocked"){
+        // Destroy all units on the tile when a block is placed
+        setBoard(function(prev){
+          var nb=cloneBoard(prev);
+          nb[row][col].forEach(function(dead){
+            if(dead.typeId===0){setWinner(dead.owner==="p1"?"P2":"P1");return;}
+            if(!dead.neutral&&dead.typeId!==0){
+              if(dead.owner==="p1"){setP1Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P2");return nl;});}
+              else{setP2Life(function(l){var nl=Math.max(0,l-1);if(nl<=0)setWinner("P1");return nl;});}
+            }
+            addLog(UNITS[dead.typeId]?UNITS[dead.typeId].name:"Unit"+" crushed by blocked tile!","death");
+          });
+          nb[row][col]=[];
+          return nb;
+        });
+      }
     }
     // helper: set tile effects in radius
     function setTERadius(row,col,radius,type,cycles){
@@ -2198,13 +2304,13 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     // ── Unit-targeting spells ─────────────────────────────────────────────────
     if(id==="warcry"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+2};addLog("War Cry: +2 ATK to "+UNITS[u.typeId].name+".","buff");
+      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+2,spellFx:[...(u.spellFx||[]),"War Cry: +2 ATK"]};addLog("War Cry: +2 ATK to "+UNITS[u.typeId].name+".","buff");
     } else if(id==="battlesong"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+1};addLog("Battle Song: +1 ATK permanently to "+UNITS[u.typeId].name+".","buff");
+      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+1,spellFx:[...(u.spellFx||[]),"Battle Song: +1 ATK"]};addLog("Battle Song: +1 ATK permanently to "+UNITS[u.typeId].name+".","buff");
     } else if(id==="sharpen"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+1};addLog("Sharpen: +1 ATK this turn.","buff");
+      n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)+1,spellFx:[...(u.spellFx||[]),"Sharpen: +1 ATK"]};addLog("Sharpen: +1 ATK this turn.","buff");
     } else if(id==="furyblow"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
       n[r][c][ui]={...u,furyblow:true};addLog("Fury Blow: "+UNITS[u.typeId].name+" attacks twice this turn.","buff");
@@ -2237,7 +2343,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       n[r][c][ui]={...u,tapped:false,moved:false,sick:false};addLog("Rally: "+UNITS[u.typeId].name+" untapped.","buff");
     } else if(id==="haste"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,movBuff:(u.movBuff||0)+1};addLog("Haste: +1 movement this turn.","buff");
+      n[r][c][ui]={...u,movBuff:(u.movBuff||0)+1,spellFx:[...(u.spellFx||[]),"Haste: +1 MOV"]};addLog("Haste: +1 movement this turn.","buff");
     } else if(id==="retreat"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       var nr=r+(cp==="p1"?1:-1);
@@ -2245,10 +2351,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       else{addLog("Cannot retreat — tile blocked.");}
     } else if(id==="shield"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      n[r][c][ui]={...u,shielded:true};addLog("Shield Wall: "+UNITS[u.typeId].name+" shielded.","buff");
+      n[r][c][ui]={...u,shielded:true,spellFx:[...(u.spellFx||[]),"Shield Wall: blocks next hit"]};addLog("Shield Wall: "+UNITS[u.typeId].name+" shielded.","buff");
     } else if(id==="guardup"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba2=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba2};addLog("Guard Up: Armor granted this turn.","buff");
+      var ba2=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba2,spellFx:[...(u.spellFx||[]),"Guard Up: Armor"]};addLog("Guard Up: Armor granted this turn.","buff");
     } else if(id==="warcry2"){
       for(var rr=0;rr<BOARD;rr++)for(var cc2=0;cc2<BOARD;cc2++)n[rr][cc2]=n[rr][cc2].map(function(x){return x.owner===cp?{...x,atkBuff:(x.atkBuff||0)+1}:x;});
       addLog("War Howl: all friendly units +1 ATK.","buff");
@@ -2288,16 +2394,16 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       var ba4=[...(u.bonusAbilities||[]),"immovable_temp"];n[r][c][ui]={...u,bonusAbilities:ba4,moved:true};addLog("Root Strike: "+UNITS[u.typeId].name+" immovable this turn.","debuff");
     } else if(id==="marksman"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba5=[...(u.bonusAbilities||[]),"range"];n[r][c][ui]={...u,bonusAbilities:ba5};addLog("Marksman: Range granted this turn.","buff");
+      var ba5=[...(u.bonusAbilities||[]),"range"];n[r][c][ui]={...u,bonusAbilities:ba5,spellFx:[...(u.spellFx||[]),"Marksman: Range"]};addLog("Marksman: Range granted this turn.","buff");
     } else if(id==="blindshot"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       var ba6=(u.bonusAbilities||[]).filter(function(a){return a!=="range";});n[r][c][ui]={...u,bonusAbilities:ba6};addLog("Blind Shot: Range removed from "+UNITS[u.typeId].name+".","debuff");
     } else if(id==="stonewarden"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba7=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba7,hp:u.hp+2,maxHp:(u.maxHp||UNITS[u.typeId].hp)+2};addLog("Stone Warden: Armor and +2 HP.","buff");
+      var ba7=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba7,hp:u.hp+2,maxHp:(u.maxHp||UNITS[u.typeId].hp)+2,spellFx:[...(u.spellFx||[]),"Stone Warden: Armor +2HP"]};addLog("Stone Warden: Armor and +2 HP.","buff");
     } else if(id==="piercearmor"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba8=[...(u.bonusAbilities||[]),"pierce"];n[r][c][ui]={...u,bonusAbilities:ba8};addLog("Pierce Armor: Pierce granted this turn.","buff");
+      var ba8=[...(u.bonusAbilities||[]),"pierce"];n[r][c][ui]={...u,bonusAbilities:ba8,spellFx:[...(u.spellFx||[]),"Pierce Armor: Pierce"]};addLog("Pierce Armor: Pierce granted this turn.","buff");
     } else if(id==="deathstrike"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       if(u.typeId===0){addLog("Cannot target King.");return;}
@@ -2412,6 +2518,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   return (
     <div style={{minHeight:"100vh",background:"#131820",color:"#c8d0e0",fontFamily:"Courier New,monospace",display:"flex",gap:0}}>
       <InjectCSS/>
+      {/* In-game chat (online only) */}
+      {isOnline&&lobbyChat&&<InGameChatPanel lobbyChat={lobbyChat}/>}
       {/* Centre */}
       <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0",gap:4,overflow:"hidden"}}>
         {/* Header */}
