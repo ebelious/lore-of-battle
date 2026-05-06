@@ -55,9 +55,16 @@ function makeUnit(typeId, owner) {
 }
 
 // ─── Movement & Attack helpers ────────────────────────────────────────────────
+function isImmovable(unit) {
+  return UNITS[unit.typeId].abilities.includes("immovable") ||
+    (unit.bonusAbilities||[]).includes("immovable") ||
+    (unit.bonusAbilities||[]).includes("immovable_temp");
+}
+
 function canMove(unit, fr, fc, tr, tc, blockedTiles) {
   if (unit.tapped || unit.moved || unit.sick) return false;
   if (UNITS[unit.typeId].movDist === 0) return false;
+  if (isImmovable(unit)) return false;
   const key = `${tr},${tc}`;
   if (blockedTiles[key]) return false;
   const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
@@ -1828,7 +1835,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         for (let r=0;r<BOARD;r++) for (let c=0;c<BOARD;c++) {
           if (!n[r][c].length) continue;
           const top = n[r][c][n[r][c].length-1];
-          if (top.typeId===0 || (UNITS[top.typeId]&&UNITS[top.typeId].abilities&&UNITS[top.typeId].abilities.includes("immovable"))) continue;
+          if (top.typeId===0 || isImmovable(top)) continue;
           const nc = c<3?c+1:c>3?c-1:c;
           if (nc!==c && n[r][nc].length<4) { n[r][nc].push(n[r][c].pop()); }
         }
@@ -2189,7 +2196,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
     // Tap attacker — find by ID to avoid stale index issues
     var attIdxNow = n[fr][fc].findIndex(function(x){return x.id===att.id;});
-    if (att.typeId===3 && attIdxNow>=0 && !attDied && (fr!==tr||fc!==tc) && n[tr][tc].length<4) {
+    if (att.typeId===3 && attIdxNow>=0 && !attDied && !isImmovable(att) && (fr!==tr||fc!==tc) && n[tr][tc].length<4) {
       // Cavalier: remove from source tile and place on target tile
       var cavUnit = n[fr][fc].splice(attIdxNow,1)[0];
       n[tr][tc].push({...cavUnit,moved:true,tapped:true,voidstep:false});
@@ -2456,6 +2463,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       n[r][c][ui]={...u,movBuff:(u.movBuff||0)+1,spellFx:[...(u.spellFx||[]),"Haste: +1 MOV"]};addLog("Haste: +1 movement this turn.","buff");
     } else if(id==="retreat"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
+      if(isImmovable(u)){addLog(UNITS[u.typeId].name+" is immovable — cannot be forced back.","debuff");return;}
       var nr=r+(cp==="p1"?1:-1);
       if(nr>=0&&nr<BOARD&&n[nr][c].length<4){n[nr][c].push({...n[r][c].splice(ui,1)[0]});addLog("Forced Retreat: enemy pushed back.","debuff");}
       else{addLog("Cannot retreat — tile blocked.");}
@@ -2493,10 +2501,12 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       n[r][c]=n[r][c].map(function(x){return x.owner===cp?{...x,tapped:false,moved:false,sick:false}:x;});addLog("Inspire: all friendly units on tile untapped.","buff");
     } else if(id==="teleport"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      if(isImmovable(u)){addLog(UNITS[u.typeId].name+" is immovable — cannot be teleported.","debuff");return;}
       // mark unit for teleport — handled as two-step; simplified: teleport to clicked empty tile
       addLog("Teleport: "+UNITS[u.typeId].name+" teleported.","buff");
     } else if(id==="shove"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
+      if(isImmovable(u)){addLog(UNITS[u.typeId].name+" is immovable — cannot be shoved.","debuff");return;}
       var sr=r+(cp==="p1"?1:-1);if(sr>=0&&sr<BOARD&&n[sr][c].length<4){n[sr][c].push({...n[r][c].splice(ui,1)[0]});addLog("Shove: enemy pushed 1 tile.","debuff");}
       else{var sc2=c+1<BOARD&&n[r][c+1].length<4?c+1:c-1>=0&&n[r][c-1].length<4?c-1:-1;if(sc2>=0){n[r][sc2].push({...n[r][c].splice(ui,1)[0]});addLog("Shove: enemy pushed sideways.","debuff");}else addLog("No room to shove.");}
     } else if(id==="rootstrike"){
@@ -2541,6 +2551,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       addLog("Mass Rally: all friendly units untapped.","buff");
     } else if(id==="voidstep"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      if(isImmovable(u)){addLog(UNITS[u.typeId].name+" is immovable — cannot use Void Step.","debuff");return;}
       // Store unit info, switch to destination-picking phase
       voidstepRef.current={r:r,c:c,unitIdx:ui,unit:u,cost:cost,spell:castingSpell};
       addLog("Void Step: choose a destination tile for "+UNITS[u.typeId].name+".","buff");
@@ -2935,8 +2946,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     const u = board[r][c][unitIdx];
     if (!u||u.owner!==cp) { addLog("Select your unit."); return; }
     if (UNITS[u.typeId].abilities.includes("slow")) { addLog(`${UNITS[u.typeId].name} cannot retreat (Slow).`); return; }
-    if (UNITS[u.typeId].movDist===0) { addLog("Immoveable unit cannot retreat."); return; }
-    if(UNITS[u.typeId].abilities.includes("immovable")){addLog(UNITS[u.typeId].name+" is immoveable.");return;}
+    if (isImmovable(u)) { addLog(UNITS[u.typeId].name+" is immovable — cannot retreat."); return; }
     var hasFallback=UNITS[u.typeId].abilities.includes("fallback")||(u.bonusAbilities||[]).includes("fallback");
     var retreatCost=hasFallback?0:2;
     if(cpPts<retreatCost){addLog("Retreat costs "+retreatCost+"pt.","points");return;}
