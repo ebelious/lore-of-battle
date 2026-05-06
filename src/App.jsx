@@ -2811,6 +2811,12 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
             </div>
           </React.Fragment>}
         </div>
+        {/* Event deck indicator */}
+        <div style={{borderTop:"1px solid #1e2535",padding:"5px 12px",display:"flex",alignItems:"center",gap:8,background:"#0a0c10",flexShrink:0}}>
+          <div style={{fontSize:8,color:"#2a3550",letterSpacing:2,flexShrink:0}}>BATTLE:</div>
+          <div style={{fontSize:10,fontWeight:"bold",color:deck?deck.color:"#4a5568",letterSpacing:1}}>{deck?deck.name:"—"}</div>
+          {activeEvent&&<div style={{fontSize:8,color:activeEvent.color||"#d97706",background:(activeEvent.color||"#d97706")+"18",borderRadius:2,padding:"1px 6px",border:"1px solid "+(activeEvent.color||"#d97706")+"44",letterSpacing:1,marginLeft:4}}>⚡ {activeEvent.name}</div>}
+        </div>
       </div>
       {/* Right: battle log + reference (two equal panels) */}
       <div style={{width:280,background:"#0a0c12",borderLeft:"2px solid #1e2535",display:"flex",flexDirection:"column",height:"100vh",flexShrink:0}}>
