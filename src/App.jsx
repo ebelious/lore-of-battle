@@ -2385,7 +2385,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     }
     // helper: set tile effect
     function setTE(row,col,type,cycles){
-      setTileEffects(function(prev){var k=row+","+col;return {...prev,[k]:{type:type,turnsLeft:cycles*2+1}};});
+      setTileEffects(function(prev){var k=row+","+col;return {...prev,[k]:{type:type,turnsLeft:cycles+1}};});
       if(type==="blocked"){
         // Destroy all units on the tile when a block is placed
         setBoard(function(prev){
