@@ -62,7 +62,7 @@ function canMove(unit, fr, fc, tr, tc, blockedTiles) {
   if (blockedTiles[key]) return false;
   const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
   if (dr===0 && dc===0) return false;
-  const dist = UNITS[unit.typeId].movDist;
+  const dist = UNITS[unit.typeId].movDist + (unit.movBuff||0);
   const shape = UNITS[unit.typeId].movShape;
   if (shape === "all")   return Math.max(dr,dc) <= dist;
   if (shape === "cross") return (dr===0||dc===0) && Math.max(dr,dc) <= dist;
@@ -74,6 +74,9 @@ function canAttack(unit, fr, fc, tr, tc) {
   if (unit.frozenAfterMove) return false;
   const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
   const cheby = Math.max(dr,dc);
+  // If unit has range from bonusAbilities (spell/item), treat as ranged2 range
+  const hasRangeBonus = (unit.bonusAbilities||[]).includes("range");
+  if (hasRangeBonus && cheby >= 1 && cheby <= 3) return true;
   const shape = UNITS[unit.typeId].atkShape;
   if (shape === "same")     return cheby === 0;
   if (shape === "adjacent") return cheby <= 1;
@@ -1638,7 +1641,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       /pt\.|pts\.|cast \(|Draw costs|Retreat costs|Need \d|costs \d/.test(msg) ? "points" :
       /EVENT:|has ended|cycle|Cycle/.test(msg) ? "event" : "default"
     );
-    setLog(function(prev){return [{msg:msg,tag:tag},...prev.slice(0,79)];});
+    setLog(function(prev){return [{msg:msg,tag:tag},...prev];});
   }
 
   // ── Turn management ──────────────────────────────────────────────────────────
@@ -2164,7 +2167,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     const attAtk = UNITS[att.typeId].atk + (att.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (tileEffects[`${fr},${fc}`]?.type==="blessed"?1:tileEffects[`${fr},${fc}`]?.type==="cursed"?-1:0) + attEncamp;
     var defEncamp = (def.owner==="p1"&&tr===0)||(def.owner==="p2"&&tr===6)?1:0;
     const defAtk = UNITS[def.typeId].atk + (def.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (tileEffects[`${tr},${tc}`]?.type==="blessed"?1:tileEffects[`${tr},${tc}`]?.type==="cursed"?-1:0) + defEncamp;
-    const isRanged = UNITS[att.typeId].abilities.includes("range");
+    const isRanged = UNITS[att.typeId].abilities.includes("range") || (att.bonusAbilities||[]).includes("range");
     const counter = isRanged || att.voidstep ? 0 : Math.max(0,defAtk);
     const dmg = Math.max(0,attAtk);
     var encampHPBonus = defEncamp; // +1 effective HP while in encampment
@@ -2191,8 +2194,18 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       var cavUnit = n[fr][fc].splice(attIdxNow,1)[0];
       n[tr][tc].push({...cavUnit,moved:true,tapped:true,voidstep:false});
     } else if (attIdxNow>=0) {
-      // All other units: tap in place
-      n[fr][fc][attIdxNow] = {...n[fr][fc][attIdxNow], tapped:true, voidstep:false};
+      var cu=n[fr][fc][attIdxNow];
+      // Fury Blow: attack twice — first hit keeps untapped, clears furyblow
+      if(cu.furyblow){
+        n[fr][fc][attIdxNow]={...cu,furyblow:false,tapped:false,voidstep:false};
+        addLog("Fury Blow: "+UNITS[att.typeId].name+" may attack once more!","buff");
+      // Onslaught: attack up to 3 times — decrement counter
+      } else if(cu.onslaughtCount&&cu.onslaughtCount>1){
+        n[fr][fc][attIdxNow]={...cu,onslaughtCount:cu.onslaughtCount-1,tapped:false,voidstep:false};
+        addLog("Onslaught: "+UNITS[att.typeId].name+" has "+(cu.onslaughtCount-1)+" attack(s) remaining.","buff");
+      } else {
+        n[fr][fc][attIdxNow]={...cu,tapped:true,voidstep:false,onslaughtCount:0};
+      }
     }
 
     // Loot drop BEFORE setBoard
@@ -2821,8 +2834,11 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       {/* Right: battle log + reference (two equal panels) */}
       <div style={{width:280,background:"#0a0c12",borderLeft:"2px solid #1e2535",display:"flex",flexDirection:"column",height:"100vh",flexShrink:0}}>
         <div style={{flex:"0 0 50%",padding:"10px 8px",display:"flex",flexDirection:"column",gap:0,minHeight:0,borderBottom:"2px solid #1e2535"}}>
-          <div style={{color:"#4a5568",letterSpacing:3,fontSize:10,marginBottom:8,fontWeight:"bold",borderBottom:"1px solid #1e2535",paddingBottom:4,flexShrink:0}}>BATTLE LOG</div>
-          <div style={{overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:3}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #1e2535",paddingBottom:4,flexShrink:0,marginBottom:8}}>
+            <div style={{color:"#4a5568",letterSpacing:3,fontSize:10,fontWeight:"bold"}}>BATTLE LOG</div>
+            <div style={{fontSize:8,color:"#2a3550"}}>{log.length} entries</div>
+          </div>
+          <div style={{overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:3,scrollbarWidth:"thin",scrollbarColor:"#2a3550 transparent"}}>
             {log.map(function(entry,i){
               var msg=typeof entry==="string"?entry:entry.msg;
               var tag=typeof entry==="string"?"default":entry.tag;
