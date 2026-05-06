@@ -1625,7 +1625,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if(msg.type==="HIDE_EVENT_POPUP"){setShowEventPopup(false);}
       if(msg.type==="SHOW_LOOT_POPUP"){setLootPopup(msg.payload);}
       if(msg.type==="HIDE_LOOT_POPUP"){setLootPopup(null);}
-      if(msg.type==="LOG"){addLog(msg.msg,msg.tag);}
+      if(msg.type==="LOG"){suppressLogSyncRef.current=true;addLog(msg.msg,msg.tag);suppressLogSyncRef.current=false;}
       if(msg.type==="DISCONNECT"){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");}
     }
     function handleClose(){setOnlineStatus("disconnected");addLog("Opponent disconnected.","death");}
@@ -1640,6 +1640,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     };
   },[isOnline,onlineConn]);
 
+  var suppressLogSyncRef = useRef(false);
   function addLog(msg, type) {
     var tag = type || (
       /destroyed|consumed|killed|dies|lost with/.test(msg) ? "death" :
@@ -1649,6 +1650,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       /EVENT:|has ended|cycle|Cycle/.test(msg) ? "event" : "default"
     );
     setLog(function(prev){return [{msg:msg,tag:tag},...prev];});
+    if(!suppressLogSyncRef.current) sendOnline({type:"LOG",msg:msg,tag:tag});
   }
 
   // ── Turn management ──────────────────────────────────────────────────────────
@@ -1757,6 +1759,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           setEventCyclesLeft(0); eventCyclesRef.current = 0;
           setP1MaxPts(MAX_PTS); setP2MaxPts(MAX_PTS);
           drawEvent();
+          setTimeout(function(){sendState();},160);
         } else {
           setEventCyclesLeft(left); eventCyclesRef.current = left;
           addLog(`"${cur.name}" — ${left} cycle${left!==1?"s":""} remaining.`);
