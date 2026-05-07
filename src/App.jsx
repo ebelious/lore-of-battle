@@ -35,7 +35,7 @@ const UNITS = {
   1: { name:"Soldier",     short:"SOL", atk:1, hp:2,  cost:1,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["charge"],                     mergeTo:2,    life:1  },
   2: { name:"Knight",      short:"KNT", atk:2, hp:3,  cost:4,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["armor","fallback"],           mergeTo:3,    life:1  },
   3: { name:"Cavalier",    short:"CAV", atk:4, hp:4,  cost:5,  movDist:2, movShape:"cross", atkShape:"lshape_same",   abilities:["armor","fallback"],           mergeTo:4,    life:1  },
-  4: { name:"General",     short:"GEN", atk:5, hp:5,  cost:6,  movDist:2, movShape:"cross", atkShape:"adjacent", abilities:["armor","charge","fallback"],  mergeTo:null, life:1  },
+  4: { name:"General",     short:"GEN", atk:5, hp:5,  cost:6,  movDist:2, movShape:"cross", atkShape:"lshape_same", abilities:["armor","charge","fallback"],  mergeTo:null, life:1  },
   5: { name:"Tower",       short:"TWR", atk:4, hp:8,  cost:6,  movDist:0, movShape:"none",  atkShape:"ballista", abilities:["armor","range","pierce","immovable"], mergeTo:null, life:1 },
   6: { name:"Archer",      short:"ARC", atk:1, hp:1,  cost:1,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","fallback"],           mergeTo:7,    life:1  },
   7: { name:"Crossbowman", short:"XBW", atk:2, hp:2,  cost:4,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","pierce"],             mergeTo:8,    life:1  },
@@ -90,7 +90,8 @@ const ABILITY_DESC = {
   charge:"No summoning sickness", armor:"Immune to ranged (non-pierce)",
   fallback:"Retreat costs 0pts", range:"Ranged attacker",
   pierce:"Bypasses armor", immovable:"Cannot move or be moved",
-  slow:"Cannot retreat"
+  slow:"Cannot retreat", flank:"Can attack and advance via L-shape (not into encampment)",
+  stealth:"Cannot be targeted by spells or ranged attacks"
 };
 
 function makeUnit(typeId, owner) {
@@ -142,7 +143,9 @@ function canAttack(unit, fr, fc, tr, tc) {
   const hasRangeBonus = (unit.bonusAbilities||[]).includes("range");
   var rangeBonus = unit.rangeBuff||0;
   if (hasRangeBonus && cheby >= 1 && cheby <= 3+rangeBonus) return true;
-  const shape = UNITS[unit.typeId].atkShape;
+  // If unit has flank ability, also allow L-shape attacks
+  const hasFlank = (unit.bonusAbilities||[]).includes("flank") || (UNITS[unit.typeId]&&UNITS[unit.typeId].abilities||[]).includes("flank");
+  if (hasFlank && ((dr===1&&dc===2)||(dr===2&&dc===1))) return true;
   var rb = unit.rangeBuff||0;
   if (shape === "same")     return cheby === 0;
   if (shape === "adjacent") return cheby <= 1;
@@ -706,6 +709,8 @@ const ALL_SPELLS=[
   {id:"advanceguard",name:"Advance Guard",   rarity:"rare",    cost:4, target:"own",   color:"#4ade80", tag:"summon", desc:"Summon 1 Soldier to each of 3 front-row tiles."},
   {id:"stormlines",  name:"Storm the Lines", rarity:"rare",    cost:4, target:"enemy", color:"#e05252", tag:"summon", desc:"Summon 2 Soldiers adjacent to a target enemy unit."},
   {id:"warengine",   name:"War Engine",      rarity:"rare",    cost:5, target:"tile",  color:"#d69e2e", tag:"summon", desc:"Summon a Cavalier to a target battlefield tile."},
+  {id:"grantflank",  name:"Flanking Strike",  rarity:"uncommon",cost:3, target:"own",   color:"#d69e2e", desc:"Grant a friendly unit the Flank ability — it can attack and advance via L-shape."},
+  {id:"shadowveil",  name:"Shadow Veil",      rarity:"rare",    cost:4, target:"own",   color:"#b794f4", desc:"Grant a friendly unit Stealth — it cannot be targeted by spells or ranged attacks."},
 ];
 const SPELL_MAX_COPIES={common:4,uncommon:2,rare:1};
 function makeRandomSpellBook() {
@@ -741,6 +746,8 @@ const REF_ABILITY_DESC={
   pierce:   {color:"#fc8181",desc:"Bypasses Armor ability on the target."},
   immovable:{color:"#718096",desc:"Cannot move or be moved by any effect."},
   slow:     {color:"#e05252",desc:"Cannot retreat from the battlefield."},
+  flank:    {color:"#d69e2e",desc:"Can attack and advance via L-shape — blocked from targeting units in their encampment."},
+  stealth:  {color:"#b794f4",desc:"Cannot be targeted by spells or ranged attacks."},
 };
 
 function ReferencePanel() {
@@ -2234,8 +2241,12 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       const isRanged = UNITS[att.typeId].abilities.includes("range")||(att.bonusAbilities||[]).includes("range");
       const defHasArmor = UNITS[u.typeId].abilities.includes("armor")||(u.bonusAbilities||[]).includes("armor");
       const hasPierce = UNITS[att.typeId].abilities.includes("pierce")||(att.bonusAbilities||[]).includes("pierce");
+      const defHasStealth = UNITS[u.typeId].abilities.includes("stealth")||(u.bonusAbilities||[]).includes("stealth");
       if (isRanged && defHasArmor && !hasPierce) {
         addLog(UNITS[u.typeId].name+" deflects ranged attack — Armor!"); setSelected(null); return;
+      }
+      if (isRanged && defHasStealth) {
+        addLog(UNITS[u.typeId].name+" is in Stealth — cannot be targeted by ranged!"); setSelected(null); return;
       }
       if (!canAttack(att,selected.r,selected.c,r,c) && !canAttackTower(att,selected.r,selected.c,r,c,board)) { addLog("Out of attack range."); return; }
       const maxAtks = MULTI_ATTACK[att.typeId]||1;
@@ -2282,11 +2293,14 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         var fdr=Math.abs(r-selected.r),fdc=Math.abs(c-selected.c);
         var isFl=(fdr===1&&fdc===2)||(fdr===2&&fdc===1);
         var inEncamp=(target.owner==="p1"&&r===0)||(target.owner==="p2"&&r===BOARD-1);
-        if(att.typeId===3&&isFl&&inEncamp){addLog("Flank blocked — cannot use L-shape attack on a unit in its encampment.","debuff");return;}
+        var hasFlankAbil2=(att.bonusAbilities||[]).includes("flank")||(UNITS[att.typeId]&&UNITS[att.typeId].abilities||[]).includes("flank");
+        if((att.typeId===3||att.typeId===4||hasFlankAbil2)&&isFl&&inEncamp){addLog("Flank blocked — cannot use L-shape attack on a unit in its encampment.","debuff");return;}
         const isRanged2=UNITS[att.typeId].abilities.includes("range")||(att.bonusAbilities||[]).includes("range");
         const defArmor2=UNITS[target.typeId].abilities.includes("armor")||(target.bonusAbilities||[]).includes("armor");
         const pierce2=UNITS[att.typeId].abilities.includes("pierce")||(att.bonusAbilities||[]).includes("pierce");
+        const defStealth=UNITS[target.typeId].abilities.includes("stealth")||(target.bonusAbilities||[]).includes("stealth");
         if (isRanged2&&defArmor2&&!pierce2){addLog(UNITS[target.typeId].name+" deflects ranged — Armor!");return;}
+        if (isRanged2&&defStealth){addLog(UNITS[target.typeId].name+" is in Stealth — cannot be targeted by ranged!");return;}
         const mx2=MULTI_ATTACK[att.typeId]||1;
         const ud2=attacksUsedMap[att.id]||0;
         if (att.tapped&&ud2>=mx2){addLog(UNITS[att.typeId].name+" already attacked.");return;}
@@ -2374,8 +2388,9 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     var dr2=Math.abs(tr-fr),dc3=Math.abs(tc-fc);
     var isFlank=(dr2===1&&dc3===2)||(dr2===2&&dc3===1);
     var targetEncamp=(def&&def.owner==="p1"&&tr===0)||(def&&def.owner==="p2"&&tr===BOARD-1);
-    if (att.typeId===3 && attIdxNow>=0 && !attDied && !isImmovable(att) && isFlank && !targetEncamp && n[tr][tc].length<4) {
-      // Cavalier: L-shape flank — advance to target tile
+    var hasFlankAbil=(att.bonusAbilities||[]).includes("flank")||(UNITS[att.typeId]&&UNITS[att.typeId].abilities||[]).includes("flank");
+    if ((att.typeId===3||att.typeId===4||hasFlankAbil) && attIdxNow>=0 && !attDied && !isImmovable(att) && isFlank && !targetEncamp && n[tr][tc].length<4) {
+      // Cavalier/General: L-shape flank — advance to target tile
       var cavUnit = n[fr][fc].splice(attIdxNow,1)[0];
       n[tr][tc].push({...cavUnit,moved:true,tapped:true,voidstep:false});
     } else if (attIdxNow>=0) {
@@ -2553,6 +2568,20 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     var ui = unitIdx!=null?unitIdx:(cell.length-1);
     var u = cell[ui];
     var handled = true;
+
+    // Block spells from targeting opponent's encampment row or units there
+    var oppEncampRow = cp==="p1" ? BOARD-1 : 0;
+    if(r===oppEncampRow){addLog("Cannot target the opponent's encampment.","debuff");return;}
+    // Also block targeting any unit that is in the opponent's encampment
+    if(u && u.owner!==cp && u.neutral!==true){
+      var uEncamp = u.owner==="p1" ? 0 : BOARD-1;
+      if(r===uEncamp){addLog("Cannot target units in the opponent's encampment.","debuff");return;}
+    }
+    // Block spells targeting a unit with Stealth (enemy units only)
+    if(u && u.owner!==cp && !u.neutral){
+      var defStealth2=UNITS[u.typeId].abilities.includes("stealth")||(u.bonusAbilities||[]).includes("stealth");
+      if(defStealth2){addLog(UNITS[u.typeId].name+" is in Stealth — cannot be targeted by spells!","debuff");return;}
+    }
 
     // helper: apply damage to a unit, handle death
     function dmgUnit(row,col,idx,dmg){
@@ -2744,57 +2773,79 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       for(var rr6=0;rr6<BOARD;rr6++)for(var cc7=0;cc7<BOARD;cc7++)n[rr6][cc7]=n[rr6][cc7].map(function(x){if(x.owner!==cp&&(UNITS[x.typeId].abilities.includes("range")||(x.bonusAbilities||[]).includes("range"))){var nba=(x.bonusAbilities||[]).filter(function(a){return a!=="range";});return {...x,bonusAbilities:nba,blindfield:2};}return x;});
       addLog("Blind Field: all enemy ranged units lose Range for 2 turns.","debuff");
     } else if(id==="calltroops"){
-      var backRow=cp==="p1"?0:6;var placed=0;
-      for(var cc8=0;cc8<BOARD&&placed<2;cc8++){if(n[backRow][cc8].length<4){n[backRow][cc8].push(makeUnit(1,cp));placed++;}}
-      addLog("Call to Arms: "+placed+" Soldiers summoned.","buff");
+      var nearRow=cp==="p1"?1:BOARD-2;
+      var freeSlots=[];for(var cc8=0;cc8<BOARD;cc8++){if(n[nearRow][cc8].length<4)freeSlots.push(cc8);}
+      if(freeSlots.length<2){addLog("Call to Arms: not enough space on your nearest battlefield row — cannot cast.","debuff");return;}
+      freeSlots.slice(0,2).forEach(function(c2){n[nearRow][c2].push(makeUnit(1,cp));});
+      addLog("Call to Arms: 2 Soldiers summoned to row "+(nearRow+1)+".","buff");
     } else if(id==="phantom"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
       var placed2=false;var dirs2=[[0,1],[0,-1],[1,0],[-1,0]];
+      var hasAdj2=dirs2.some(function(d){var pr=r+d[0],pc=c+d[1];return pr>=0&&pr<BOARD&&pc>=0&&pc<BOARD&&n[pr][pc].length<4;});
+      if(!hasAdj2){addLog("Phantom Guard: no adjacent space — cannot cast.","debuff");return;}
       for(var d2=0;d2<dirs2.length&&!placed2;d2++){var pr=r+dirs2[d2][0],pc=c+dirs2[d2][1];if(pr>=0&&pr<BOARD&&pc>=0&&pc<BOARD&&n[pr][pc].length<4){var ph=makeUnit(1,cp);ph.hp=1;ph.maxHp=1;ph.shielded=true;n[pr][pc].push(ph);placed2=true;}}
       addLog(placed2?"Phantom Guard: shield soldier summoned.":"No adjacent tile available.","buff");
     } else if(id==="conscript"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var placed3=false;var dirs3=[[0,1],[0,-1],[1,0],[-1,0]];
-      for(var d3=0;d3<dirs3.length&&!placed3;d3++){var pr3=r+dirs3[d3][0],pc3=c+dirs3[d3][1];if(pr3>=0&&pr3<BOARD&&pc3>=0&&pc3<BOARD&&n[pr3][pc3].length<4){n[pr3][pc3].push(makeUnit(1,cp));placed3=true;}}
+      var dirs3=[[0,1],[0,-1],[1,0],[-1,0]];
+      var hasAdj3=dirs3.some(function(d){var p3r=r+d[0],p3c=c+d[1];return p3r>=0&&p3r<BOARD&&p3c>=0&&p3c<BOARD&&n[p3r][p3c].length<4;});
+      if(!hasAdj3){addLog("Conscript: no adjacent space — cannot cast.","debuff");return;}
+      var placed3=false;for(var d3=0;d3<dirs3.length&&!placed3;d3++){var pr3=r+dirs3[d3][0],pc3=c+dirs3[d3][1];if(pr3>=0&&pr3<BOARD&&pc3>=0&&pc3<BOARD&&n[pr3][pc3].length<4){n[pr3][pc3].push(makeUnit(1,cp));placed3=true;}}
       addLog(placed3?"Conscript: Soldier summoned adjacent.":"No adjacent space available.","buff");
     } else if(id==="bfsurge"){
-      if(n[r][c].length>=4){addLog("Tile is full.");return;}
-      var bfRow=cp==="p1"?r:(r);
-      if(r===0||r===BOARD-1){addLog("Summon to a battlefield tile, not the back row.");return;}
+      if(n[r][c].length>=4){addLog("Battlefield Surge: tile is full — cannot cast.","debuff");return;}
+      if(r===0||r===BOARD-1){addLog("Battlefield Surge: cannot summon to an encampment row.","debuff");return;}
       n[r][c].push(makeUnit(1,cp));
       addLog("Battlefield Surge: Soldier summoned at "+tileName(r,c)+".","buff");
     } else if(id==="dblenlist"){
-      var br2=cp==="p1"?0:6;var pl4=0;
-      for(var bc2=0;bc2<BOARD&&pl4<2;bc2++){if(n[br2][bc2].length<4){n[br2][bc2].push(makeUnit(1,cp));pl4++;}}
-      addLog("Double Enlist: "+pl4+" Soldiers summoned.","buff");
+      var nr2=cp==="p1"?1:BOARD-2;
+      var freeS2=[];for(var bc2=0;bc2<BOARD;bc2++){if(n[nr2][bc2].length<4)freeS2.push(bc2);}
+      if(freeS2.length<2){addLog("Double Enlist: not enough space — cannot cast.","debuff");return;}
+      freeS2.slice(0,2).forEach(function(c2){n[nr2][c2].push(makeUnit(1,cp));});
+      addLog("Double Enlist: 2 Soldiers summoned to row "+(nr2+1)+".","buff");
     } else if(id==="flankguard"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var placed5=false;var dirs5=[[0,1],[0,-1],[1,0],[-1,0]];
-      for(var d5=0;d5<dirs5.length&&!placed5;d5++){var pr5=r+dirs5[d5][0],pc5=c+dirs5[d5][1];if(pr5>=0&&pr5<BOARD&&pc5>=0&&pc5<BOARD&&n[pr5][pc5].length<4){n[pr5][pc5].push(makeUnit(6,cp));placed5=true;}}
+      var dirs5=[[0,1],[0,-1],[1,0],[-1,0]];
+      var hasAdj5=dirs5.some(function(d){var p5r=r+d[0],p5c=c+d[1];return p5r>=0&&p5r<BOARD&&p5c>=0&&p5c<BOARD&&n[p5r][p5c].length<4;});
+      if(!hasAdj5){addLog("Flank Guard: no adjacent space — cannot cast.","debuff");return;}
+      var placed5=false;for(var d5=0;d5<dirs5.length&&!placed5;d5++){var pr5=r+dirs5[d5][0],pc5=c+dirs5[d5][1];if(pr5>=0&&pr5<BOARD&&pc5>=0&&pc5<BOARD&&n[pr5][pc5].length<4){n[pr5][pc5].push(makeUnit(6,cp));placed5=true;}}
       addLog(placed5?"Flank Guard: Archer summoned adjacent.":"No adjacent space.","buff");
     } else if(id==="knightsvow"){
-      var br3=cp==="p1"?0:6;var pl6=false;
-      for(var bc3=0;bc3<BOARD&&!pl6;bc3++){if(n[br3][bc3].length<4){n[br3][bc3].push(makeUnit(2,cp));pl6=true;}}
-      addLog(pl6?"Knight's Vow: Knight summoned to back row.":"Back row is full.","buff");
+      var nr3=cp==="p1"?1:BOARD-2;
+      var freeS3=[];for(var bc3=0;bc3<BOARD;bc3++){if(n[nr3][bc3].length<4)freeS3.push(bc3);}
+      if(freeS3.length<1){addLog("Knight's Vow: no space on nearest battlefield row — cannot cast.","debuff");return;}
+      n[nr3][freeS3[0]].push(makeUnit(2,cp));
+      addLog("Knight's Vow: Knight summoned to row "+(nr3+1)+".","buff");
     } else if(id==="xbwcompany"){
-      var br4=cp==="p1"?0:6;var pl7=0;
-      for(var bc4=0;bc4<BOARD&&pl7<2;bc4++){if(n[br4][bc4].length<4){n[br4][bc4].push(makeUnit(7,cp));pl7++;}}
-      addLog("Crossbow Company: "+pl7+" Crossbowmen summoned.","buff");
+      var nr4=cp==="p1"?1:BOARD-2;
+      var freeS4=[];for(var bc4=0;bc4<BOARD;bc4++){if(n[nr4][bc4].length<4)freeS4.push(bc4);}
+      if(freeS4.length<2){addLog("Crossbow Company: not enough space — cannot cast.","debuff");return;}
+      freeS4.slice(0,2).forEach(function(c2){n[nr4][c2].push(makeUnit(7,cp));});
+      addLog("Crossbow Company: 2 Crossbowmen summoned to row "+(nr4+1)+".","buff");
     } else if(id==="ironlegion"){
-      var fill=4-n[r][c].length;var pl8=0;
-      for(var fi=0;fi<fill;fi++){n[r][c].push(makeUnit(1,cp));pl8++;}
-      addLog(pl8>0?"Iron Legion: "+pl8+" Soldiers fill the tile at "+tileName(r,c)+".":"Tile already full.","buff");
+      if(n[r][c].length>=4){addLog("Iron Legion: tile is full — cannot cast.","debuff");return;}
+      var fill=4-n[r][c].length;for(var fi=0;fi<fill;fi++){n[r][c].push(makeUnit(1,cp));}
+      addLog("Iron Legion: "+(fill)+" Soldiers fill the tile at "+tileName(r,c)+".","buff");
     } else if(id==="advanceguard"){
-      var frontRow=cp==="p1"?1:5;var pl9=0;
-      for(var fc2=0;fc2<BOARD&&pl9<3;fc2++){if(n[frontRow][fc2].length<4){n[frontRow][fc2].push(makeUnit(1,cp));pl9++;}}
-      addLog("Advance Guard: "+pl9+" Soldiers placed on front row.","buff");
+      var nr5=cp==="p1"?1:BOARD-2;
+      var freeS5=[];for(var fc2=0;fc2<BOARD;fc2++){if(n[nr5][fc2].length<4)freeS5.push(fc2);}
+      if(freeS5.length<1){addLog("Advance Guard: no space on nearest battlefield row — cannot cast.","debuff");return;}
+      var toPlace=Math.min(3,freeS5.length);freeS5.slice(0,toPlace).forEach(function(c2){n[nr5][c2].push(makeUnit(1,cp));});
+      addLog("Advance Guard: "+toPlace+" Soldiers placed on row "+(nr5+1)+".","buff");
     } else if(id==="stormlines"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
-      var pl10=0;var dirs10=[[0,1],[0,-1],[1,0],[-1,0]];
-      for(var d10=0;d10<dirs10.length&&pl10<2;d10++){var pr10=r+dirs10[d10][0],pc10=c+dirs10[d10][1];if(pr10>=0&&pr10<BOARD&&pc10>=0&&pc10<BOARD&&n[pr10][pc10].length<4){var su=makeUnit(1,cp);su.sick=false;n[pr10][pc10].push(su);pl10++;}}
+      var dirs10=[[0,1],[0,-1],[1,0],[-1,0]];
+      var adjFree=dirs10.filter(function(d){var p10r=r+d[0],p10c=c+d[1];return p10r>=0&&p10r<BOARD&&p10c>=0&&p10c<BOARD&&n[p10r][p10c].length<4;});
+      if(adjFree.length<2){addLog("Storm the Lines: not enough adjacent space — cannot cast.","debuff");return;}
+      var pl10=0;adjFree.slice(0,2).forEach(function(d){var su=makeUnit(1,cp);su.sick=false;n[r+d[0]][c+d[1]].push(su);pl10++;});
       addLog("Storm the Lines: "+pl10+" Soldiers summoned adjacent to enemy.","buff");
-    } else if(id==="warengine"){
-      if(n[r][c].length>=4){addLog("Tile is full.");return;}
+    } else if(id==="grantflank"){
+      if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      var newUF=addAbility({...u},"flank");n[r][c][ui]={...newUF,spellFx:[...(u.spellFx||[]),"Flanking Strike: Flank"]};addLog("Flanking Strike: "+UNITS[u.typeId].name+" gains the Flank ability.","buff");
+    } else if(id==="shadowveil"){
+      if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      var newUS=addAbility({...u},"stealth");n[r][c][ui]={...newUS,spellFx:[...(u.spellFx||[]),"Shadow Veil: Stealth"]};addLog("Shadow Veil: "+UNITS[u.typeId].name+" enters Stealth.","buff");
+      if(n[r][c].length>=4){addLog("War Engine: tile is full — cannot cast.","debuff");return;}
       n[r][c].push(makeUnit(3,cp));
       addLog("War Engine: Cavalier summoned at "+tileName(r,c)+".","buff");
     } else if(id==="fortresswall"){
