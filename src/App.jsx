@@ -4,7 +4,21 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 const BOARD = 7;
 const MAX_HP = 30;
 const MAX_PTS = 6;
-// Returns true if the owner's King (typeId 0) is on their encampment row
+// Returns updated unit with ability added — no duplicates, range stacks as rangeBuff
+function addAbility(unit, ability) {
+  var baseAbils = UNITS[unit.typeId]&&UNITS[unit.typeId].abilities||[];
+  var bonusAbils = unit.bonusAbilities||[];
+  if(ability==="range"){
+    // Range stacks: each extra "range" adds 1 tile of attack distance
+    if(baseAbils.includes("range")||bonusAbils.includes("range")){
+      return {...unit, rangeBuff:(unit.rangeBuff||0)+1};
+    }
+    return {...unit, bonusAbilities:[...bonusAbils,"range"]};
+  }
+  // Non-range abilities: skip if already present
+  if(baseAbils.includes(ability)||bonusAbils.includes(ability)) return unit;
+  return {...unit, bonusAbilities:[...bonusAbils, ability]};
+}
 function isKingInEncampment(owner, board) {
   var encampRow = owner==="p1" ? 0 : BOARD-1;
   for (var c=0; c<BOARD; c++) {
@@ -22,12 +36,55 @@ const UNITS = {
   2: { name:"Knight",      short:"KNT", atk:2, hp:3,  cost:4,  movDist:1, movShape:"all",   atkShape:"same",     abilities:["armor","fallback"],           mergeTo:3,    life:1  },
   3: { name:"Cavalier",    short:"CAV", atk:4, hp:4,  cost:5,  movDist:2, movShape:"cross", atkShape:"lshape_same",   abilities:["armor","fallback"],           mergeTo:4,    life:1  },
   4: { name:"General",     short:"GEN", atk:5, hp:5,  cost:6,  movDist:2, movShape:"cross", atkShape:"adjacent", abilities:["armor","charge","fallback"],  mergeTo:null, life:1  },
-  5: { name:"Tower",       short:"TWR", atk:4, hp:8,  cost:6,  movDist:0, movShape:"none",  atkShape:"ring2",    abilities:["armor","range","pierce","immovable"], mergeTo:null, life:1 },
+  5: { name:"Tower",       short:"TWR", atk:4, hp:8,  cost:6,  movDist:0, movShape:"none",  atkShape:"ballista", abilities:["armor","range","pierce","immovable"], mergeTo:null, life:1 },
   6: { name:"Archer",      short:"ARC", atk:1, hp:1,  cost:1,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","fallback"],           mergeTo:7,    life:1  },
   7: { name:"Crossbowman", short:"XBW", atk:2, hp:2,  cost:4,  movDist:1, movShape:"cross", atkShape:"ranged1",  abilities:["range","pierce"],             mergeTo:8,    life:1  },
   8: { name:"Ballista",    short:"BAL", atk:3, hp:5,  cost:5,  movDist:1, movShape:"cross", atkShape:"ballista", abilities:["range","pierce"],              mergeTo:5,    life:1  },
 };
-const MERGE_REQ = { 1:2, 2:3, 3:4, 6:2, 7:3, 8:4 };
+const UNIT_ICON = {
+  0: "♛", // King
+  1: "✚", // Soldier
+  2: "◈", // Knight
+  3: "◀", // Cavalier
+  4: "★", // General
+  5: "▣", // Tower
+  6: "↑", // Archer
+  7: "⊕", // Crossbowman
+  8: "⊣", // Ballista
+};
+const LEGENDARY_UNIT_ABILITIES = {
+  "Bonebreaker":          ["charge","armor","pierce"],
+  "Vault Guardian":       ["immovable","armor","pierce"],
+  "Forge Construct":      ["armor","range","pierce"],
+  "Wyrm Shard":           ["range","pierce"],
+  "Thrainor's Ghost":     ["charge","armor","pierce"],
+  "The Deepborn":         ["immovable","pierce","armor"],
+  "Nyxara's Shade":       ["range","armor","fallback"],
+  "Ash Champion":         ["charge","pierce","armor"],
+  "Dragon Siege":         ["range","pierce","immovable"],
+  "Obsidian Knight":      ["armor","charge","pierce"],
+  "Siege Wyrm":           ["range","pierce","armor"],
+  "Borin Ironbreaker":    ["charge","pierce","armor"],
+  "Maeve Redveil":        ["charge","armor","fallback"],
+  "Stormcrag Chief":      ["range","pierce","armor"],
+  "Wandering Chief":      ["range","pierce"],
+  "Ailsa's Revenant":     ["pierce","fallback","range"],
+  "Iron Widow":           ["immovable","armor","pierce"],
+  "Seryth's Shade":       ["range","pierce","fallback"],
+  "Maelthas Warden":      ["armor","immovable","pierce"],
+  "Engine Fragment":      ["range","pierce","armor"],
+  "Lamentation's Voice":  ["range","pierce"],
+  "Maelthas":             ["armor","immovable","charge"],
+  "Seryth the Whisperer": ["pierce","range","fallback"],
+  "Frost Champion":       ["charge","armor","pierce"],
+  "Kael Thornwyrd":       ["charge","pierce","fallback"],
+  "First Frost Avatar":   ["range","pierce","armor"],
+  "Niflhel Shard":        ["range","pierce","armor"],
+  "Hrímveig's Echo":      ["charge","armor","pierce"],
+  "Eldrin Solhart":       ["range","fallback","charge"],
+  "First Frost":          ["range","pierce","armor"],
+};
+const MERGE_REQ  = { 1:2, 2:3, 3:4, 6:2, 7:3, 8:4 };
 const MERGE_COST = { 1:4, 2:4, 3:5, 6:4, 7:4, 8:6 };
 const ABILITY_DESC = {
   charge:"No summoning sickness", armor:"Immune to ranged (non-pierce)",
@@ -81,18 +138,20 @@ function canAttack(unit, fr, fc, tr, tc) {
   if (unit.frozenAfterMove) return false;
   const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
   const cheby = Math.max(dr,dc);
-  // If unit has range from bonusAbilities (spell/item), treat as ranged2 range
+  // If unit has range from bonusAbilities (spell/item), treat as ranged2 range; rangeBuff adds extra tiles
   const hasRangeBonus = (unit.bonusAbilities||[]).includes("range");
-  if (hasRangeBonus && cheby >= 1 && cheby <= 3) return true;
+  var rangeBonus = unit.rangeBuff||0;
+  if (hasRangeBonus && cheby >= 1 && cheby <= 3+rangeBonus) return true;
   const shape = UNITS[unit.typeId].atkShape;
+  var rb = unit.rangeBuff||0;
   if (shape === "same")     return cheby === 0;
   if (shape === "adjacent") return cheby <= 1;
   if (shape === "lshape")   return (dr===1&&dc===2)||(dr===2&&dc===1);
-  if (shape === "ring2")    return cheby >= 1 && cheby <= 2;
-  if (shape === "ranged1")  return cheby <= 1;
-  if (shape === "ranged2")  return cheby >= 1 && cheby <= 3;
-  if (shape === "ranged3")  return cheby >= 1 && cheby <= 4;
-  if (shape === "ballista")  return cheby===1 || (cheby===2 && (dr===0||dc===0));
+  if (shape === "ring2")    return cheby >= 1 && cheby <= 2+rb;
+  if (shape === "ranged1")  return cheby <= 1+rb;
+  if (shape === "ranged2")  return cheby >= 1 && cheby <= 3+rb;
+  if (shape === "ranged3")  return cheby >= 1 && cheby <= 4+rb;
+  if (shape === "ballista")  return cheby===1 || (cheby===2 && (dr===0||dc===0)) || (rb>0&&cheby<=2+rb&&(dr===0||dc===0));
   if (shape === "lshape_same") return cheby===0||(dr===1&&dc===2)||(dr===2&&dc===1);
   if (cheby===0) return true;
   return false;
@@ -371,23 +430,23 @@ function tileName(r, c) {
 
 const LOOT_COMMON = [
   {w:35, name:"Iron Shard",       color:"#a0aec0", desc:"+1 ATK",                        flavor:"A jagged splinter still thirsting for blood.",                                        apply:function(u){return {...u,atkBuff:(u.atkBuff||0)+1};}},
-  {w:22, name:"Stone Shield",     color:"#a0aec0", desc:"+1 HP, Armor",                  flavor:"Hammered from ancient walls. Arrows bounce off it.",                                 apply:function(u){var n={...u,hp:u.hp+1,maxHp:u.maxHp+1};n.bonusAbilities=[...(u.bonusAbilities||[]),"armor"];return n;}},
+  {w:22, name:"Stone Shield",     color:"#a0aec0", desc:"+1 HP, Armor",                  flavor:"Hammered from ancient walls. Arrows bounce off it.",                                 apply:function(u){var n={...u,hp:u.hp+1,maxHp:u.maxHp+1};n=addAbility(n,"armor");return n;}},
   {w:18, name:"Scout Boots",      color:"#63b3ed", desc:"+1 Movement",                   flavor:"Made for runners who cross three moors before breakfast.",                           apply:function(u){return {...u,movBuff:(u.movBuff||0)+1};}},
-  {w:10, name:"Etched Blade",     color:"#63b3ed", desc:"+2 ATK, Pierce",                flavor:"The edge ignores plate as if it were cloth.",                                       apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2};n.bonusAbilities=[...(u.bonusAbilities||[]),"pierce"];return n;}},
+  {w:10, name:"Etched Blade",     color:"#63b3ed", desc:"+2 ATK, Pierce",                flavor:"The edge ignores plate as if it were cloth.",                                       apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2};n=addAbility(n,"pierce");return n;}},
   {w:5,  name:"Star Fragment",    color:"#f6e05e", desc:"+3 ATK, +2 HP",                 flavor:"A fragment of something ancient. Carrying it feels like a debt.",                   legendaryAbility:"Once per turn: give the item's holder a free ranged attack with pierce.",    apply:function(u){return {...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+2,maxHp:u.maxHp+2};}},
-  {w:4,  name:"Durak'Thul Shard", color:"#f6e05e", desc:"+3 ATK, +1 HP, Pierce",         flavor:"A fragment of the hammer that forged a star. It still rings when you grip it.",     legendaryAbility:"Once per turn: tap 2 enemy units.",                                         apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+1,maxHp:u.maxHp+1};n.bonusAbilities=[...(u.bonusAbilities||[]),"pierce"];return n;}},
-  {w:3,  name:"Ashbound Relic",   color:"#f6e05e", desc:"+2 ATK, +2 HP, Armor",          flavor:"Pulled from the bones of Karak Azar. Whatever it protects, it remembers.",          legendaryAbility:"Once per turn: summon a soldier to an adjacent tile to the item's holder.",apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2,hp:u.hp+2,maxHp:u.maxHp+2};n.bonusAbilities=[...(u.bonusAbilities||[]),"armor"];return n;}},
+  {w:4,  name:"Durak'Thul Shard", color:"#f6e05e", desc:"+3 ATK, +1 HP, Pierce",         flavor:"A fragment of the hammer that forged a star. It still rings when you grip it.",     legendaryAbility:"Once per turn: tap 2 enemy units.",                                         apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+1,maxHp:u.maxHp+1};n=addAbility(n,"pierce");return n;}},
+  {w:3,  name:"Ashbound Relic",   color:"#f6e05e", desc:"+2 ATK, +2 HP, Armor",          flavor:"Pulled from the bones of Karak Azar. Whatever it protects, it remembers.",          legendaryAbility:"Once per turn: summon a soldier to an adjacent tile to the item's holder.",apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2,hp:u.hp+2,maxHp:u.maxHp+2};n=addAbility(n,"armor");return n;}},
   {w:3,  name:"Locket of Thaw",   color:"#f6e05e", desc:"+2 ATK, +3 HP",                 flavor:"An iron vial containing warmth that should not exist. It hums faintly.",             legendaryAbility:"Once per turn: give a tile a blessing.",                                    apply:function(u){return {...u,atkBuff:(u.atkBuff||0)+2,hp:u.hp+3,maxHp:u.maxHp+3};}},
 ];
 const LOOT_ELITE = [
-  {w:30, name:"Warden Plate",       color:"#63b3ed", desc:"+2 HP, Armor, +1 MOV",          flavor:"Full plate with articulated joints. Strike and move.",                              apply:function(u){var n={...u,hp:u.hp+2,maxHp:u.maxHp+2,movBuff:(u.movBuff||0)+1};n.bonusAbilities=[...(u.bonusAbilities||[]),"armor"];return n;}},
-  {w:24, name:"Piercing Fang",      color:"#63b3ed", desc:"+3 ATK, Pierce",                 flavor:"Still crackles when gripped tight.",                                               apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3};n.bonusAbilities=[...(u.bonusAbilities||[]),"pierce"];return n;}},
-  {w:18, name:"Ranger Mantle",      color:"#9f7aea", desc:"+2 ATK, Range, Fallback",        flavor:"Strike from afar. Retreat for free.",                                              apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2};n.bonusAbilities=[...(u.bonusAbilities||[]),"range","fallback"];return n;}},
-  {w:8,  name:"Warchief Crown",     color:"#f6e05e", desc:"+4 ATK, +2 HP, Pierce",          flavor:"Only the greatest have worn this. Most of them are dead.",                         legendaryAbility:"Once per turn: give the item holder's controller a free spell.",            apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+2,maxHp:u.maxHp+2};n.bonusAbilities=[...(u.bonusAbilities||[]),"pierce"];return n;}},
-  {w:5,  name:"Legendary Spear",    color:"#f6e05e", desc:"+4 ATK, +3 HP, Range, Pierce",   flavor:"Broken and reforged. You hear ancient winds when you grip it.",                    legendaryAbility:"Once per turn: Leap to another tile and attack a unit while not taking damage.", apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+3,maxHp:u.maxHp+3};n.bonusAbilities=[...(u.bonusAbilities||[]),"range","pierce"];return n;}},
-  {w:4,  name:"Niflhel Shard",      color:"#f6e05e", desc:"+4 ATK, +2 HP, Pierce",          flavor:"A sliver of the Spear of Final Winter. It whispers of endings.",                   legendaryAbility:"Once per turn: make a frozen tile that lasts 2 cycles.",                   apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+2,maxHp:u.maxHp+2};n.bonusAbilities=[...(u.bonusAbilities||[]),"pierce"];return n;}},
-  {w:4,  name:"Obsidian Gauntlet",  color:"#f6e05e", desc:"+3 ATK, +3 HP, Armor, Pierce",   flavor:"Forged in Vyrathrax's fire until it was no longer merely armour.",                 legendaryAbility:"Give the item's holder the ability to attack 2 times each turn.",           apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+3,maxHp:u.maxHp+3};n.bonusAbilities=[...(u.bonusAbilities||[]),"armor","pierce"];return n;}},
-  {w:3,  name:"Lamentation's Tear", color:"#f6e05e", desc:"+3 ATK, +4 HP, Armor",           flavor:"A single tear of weeping black diamond, hardened into something unbreakable.",      legendaryAbility:"Once per turn: make a blockable tile that lasts 2 cycles.",                apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+4,maxHp:u.maxHp+4};n.bonusAbilities=[...(u.bonusAbilities||[]),"armor"];return n;}},
+  {w:30, name:"Warden Plate",       color:"#63b3ed", desc:"+2 HP, Armor, +1 MOV",          flavor:"Full plate with articulated joints. Strike and move.",                              apply:function(u){var n={...u,hp:u.hp+2,maxHp:u.maxHp+2,movBuff:(u.movBuff||0)+1};n=addAbility(n,"armor");return n;}},
+  {w:24, name:"Piercing Fang",      color:"#63b3ed", desc:"+3 ATK, Pierce",                 flavor:"Still crackles when gripped tight.",                                               apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3};n=addAbility(n,"pierce");return n;}},
+  {w:18, name:"Ranger Mantle",      color:"#9f7aea", desc:"+2 ATK, Range, Fallback",        flavor:"Strike from afar. Retreat for free.",                                              apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+2};n=addAbility(n,"range");n=addAbility(n,"fallback");return n;}},
+  {w:8,  name:"Warchief Crown",     color:"#f6e05e", desc:"+4 ATK, +2 HP, Pierce",          flavor:"Only the greatest have worn this. Most of them are dead.",                         legendaryAbility:"Once per turn: give the item holder's controller a free spell.",            apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+2,maxHp:u.maxHp+2};n=addAbility(n,"pierce");return n;}},
+  {w:5,  name:"Legendary Spear",    color:"#f6e05e", desc:"+4 ATK, +3 HP, Range, Pierce",   flavor:"Broken and reforged. You hear ancient winds when you grip it.",                    legendaryAbility:"Once per turn: Leap to another tile and attack a unit while not taking damage.", apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+3,maxHp:u.maxHp+3};n=addAbility(n,"range");n=addAbility(n,"pierce");return n;}},
+  {w:4,  name:"Niflhel Shard",      color:"#f6e05e", desc:"+4 ATK, +2 HP, Pierce",          flavor:"A sliver of the Spear of Final Winter. It whispers of endings.",                   legendaryAbility:"Once per turn: make a frozen tile that lasts 2 cycles.",                   apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+2,maxHp:u.maxHp+2};n=addAbility(n,"pierce");return n;}},
+  {w:4,  name:"Obsidian Gauntlet",  color:"#f6e05e", desc:"+3 ATK, +3 HP, Armor, Pierce",   flavor:"Forged in Vyrathrax's fire until it was no longer merely armour.",                 legendaryAbility:"Give the item's holder the ability to attack 2 times each turn.",           apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+3,maxHp:u.maxHp+3};n=addAbility(n,"armor");n=addAbility(n,"pierce");return n;}},
+  {w:3,  name:"Lamentation's Tear", color:"#f6e05e", desc:"+3 ATK, +4 HP, Armor",           flavor:"A single tear of weeping black diamond, hardened into something unbreakable.",      legendaryAbility:"Once per turn: make a blockable tile that lasts 2 cycles.",                apply:function(u){var n={...u,atkBuff:(u.atkBuff||0)+3,hp:u.hp+4,maxHp:u.maxHp+4};n=addAbility(n,"armor");return n;}},
   {w:4,  name:"Stormbreaker Hilt",  color:"#f6e05e", desc:"+4 ATK, +2 HP, +1 MOV",          flavor:"All that remains of the stone Borin split. It still hums with the impact.",        legendaryAbility:"Once per turn: move 2 units 1 tile away from their present tile.",          apply:function(u){return {...u,atkBuff:(u.atkBuff||0)+4,hp:u.hp+2,maxHp:u.maxHp+2,movBuff:(u.movBuff||0)+1};}},
 ];
 
@@ -412,25 +471,40 @@ const TILE_CSS = `
 @keyframes pulse-ice{0%,100%{box-shadow:inset 0 0 0 #63b3ed}50%{box-shadow:inset 0 0 14px #63b3edcc}}
 @keyframes pulse-cursed{0%,100%{box-shadow:inset 0 0 0 #9f7aea}50%{box-shadow:inset 0 0 14px #9f7aeacc}}
 @keyframes pulse-blessed{0%,100%{box-shadow:inset 0 0 0 #68d391}50%{box-shadow:inset 0 0 14px #68d391cc}}
+@keyframes pulse-legendary{0%,100%{box-shadow:0 0 0px #d69e2e,0 0 0px #d69e2e44}50%{box-shadow:0 0 8px #d69e2e,0 0 16px #d69e2e66}}
 .tile-fire{animation:pulse-fire 2.2s ease-in-out infinite}
 .tile-ice{animation:pulse-ice 2.5s ease-in-out infinite}
 .tile-cursed{animation:pulse-cursed 2.8s ease-in-out infinite}
 .tile-blessed{animation:pulse-blessed 2.4s ease-in-out infinite}
+.unit-legendary{animation:pulse-legendary 2s ease-in-out infinite}
 `;
 
 function InjectCSS() { return React.createElement('style',{dangerouslySetInnerHTML:{__html:TILE_CSS}}); }
 
-function clampPos(x,y,w,h) {
+function clampPos(x,y,w,h,avoidCentre) {
   var vw=typeof window!=="undefined"?window.innerWidth:1200;
   var vh=typeof window!=="undefined"?window.innerHeight:800;
-  return {left:Math.min(x+14,vw-w-8),top:Math.max(8,Math.min(y-10,vh-h-8))};
+  var left=Math.min(x+14,vw-w-8);
+  var top=Math.max(8,Math.min(y-10,vh-h-8));
+  if(avoidCentre){
+    // If tooltip would overlap the modal popup zone (centre ~30% of screen), push it to a corner
+    var cx=vw/2, cy=vh/2;
+    var overlapX=left<cx+200&&left+w>cx-200;
+    var overlapY=top<cy+250&&top+h>cy-250;
+    if(overlapX&&overlapY){
+      // Push to top-left or top-right corner away from cursor
+      left=x>vw/2?8:vw-w-8;
+      top=8;
+    }
+  }
+  return {left:left,top:top};
 }
 
-function TileTip({tip}) {
+function TileTip({tip,popup}) {
   var info={fire:{icon:"🔥",color:"#fc8181",label:"Fire",effects:["1 dmg on entry","1 dmg each event cycle"]},ice:{icon:"❄",color:"#63b3ed",label:"Ice",effects:["Frozen after moving — cannot attack"]},cursed:{icon:"☠",color:"#9f7aea",label:"Cursed",effects:["-1 ATK while standing here"]},blessed:{icon:"✦",color:"#68d391",label:"Blessed",effects:["+1 ATK while standing here"]}};
   var ti=info[tip.type];
   if(!ti)return null;
-  var pos=clampPos(tip.x,tip.y,210,150);
+  var pos=clampPos(tip.x,tip.y,210,150,popup);
   return (
     <div style={{position:"fixed",left:pos.left,top:pos.top,zIndex:250,pointerEvents:"none",background:"#0a0c14",border:"1px solid "+ti.color+"66",borderTop:"2px solid "+ti.color,borderRadius:4,padding:"10px 13px",minWidth:180,fontFamily:"Courier New,monospace"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
@@ -442,10 +516,10 @@ function TileTip({tip}) {
   );
 }
 
-function UnitTip({u,x,y,board,tileEffects,evFx}) {
+function UnitTip({u,x,y,board,tileEffects,evFx,popup}) {
   var def=UNITS[u.typeId];
   if(!def)return null;
-  var pos=clampPos(x,y,270,400);
+  var pos=clampPos(x,y,270,400,popup);
   var oc=u.owner==="p1"?"#4299e1":u.owner==="p2"?"#fc8181":"#a07040";
   var tileKey=null;
   for(var tr=0;tr<BOARD&&!tileKey;tr++)for(var tc=0;tc<BOARD&&!tileKey;tc++){if(board[tr][tc].some(function(x2){return x2.id===u.id;}))tileKey=tr+","+tc;}
@@ -607,7 +681,7 @@ const ALL_SPELLS=[
   {id:"resurrection",name:"Resurrection",   rarity:"rare",    cost:5, target:"own",   color:"#f6e05e", desc:"Return a destroyed friendly unit to an adjacent tile at full HP."},
   {id:"bloodpact",   name:"Blood Pact",      rarity:"rare",    cost:4, target:"own",   color:"#c53030", desc:"Halve a friendly unit's HP to double its ATK permanently."},
   {id:"dominion",    name:"Dominion",        rarity:"rare",    cost:4, target:"enemy", color:"#9f7aea", desc:"Take control of a target enemy unit for 1 turn."},
-  {id:"paralyze",    name:"Paralyze",        rarity:"rare",    cost:3, target:"enemy", color:"#718096", desc:"Tap all enemy units on the board this turn."},
+  {id:"paralyze",    name:"Paralyze",        rarity:"rare",    cost:6, target:"enemy", color:"#718096", desc:"Tap all enemy units on the board for 1 cycle."},
   {id:"massrally",   name:"Mass Rally",      rarity:"rare",    cost:4, target:"own",   color:"#4ade80", desc:"Untap all friendly units on the board."},
   {id:"voidstep",    name:"Void Step",       rarity:"rare",    cost:3, target:"own",   color:"#b794f4", desc:"Target friendly unit leaps to any tile and attacks without counter damage."},
   {id:"armageddon",  name:"Armageddon",      rarity:"rare",    cost:5, target:"tile",  color:"#c53030", desc:"Set all tiles in a 2-tile radius on fire for 3 cycles."},
@@ -621,6 +695,17 @@ const ALL_SPELLS=[
   {id:"fortresswall",name:"Fortress Wall",   rarity:"rare",    cost:5, target:"own",   color:"#a0aec0", desc:"All friendly units gain Armor, +2 HP, and Shield this turn."},
   {id:"nullfield",   name:"Null Field",      rarity:"rare",    cost:4, target:"tile",  color:"#718096", desc:"Remove and block all tile effects in a 2-tile area for 3 cycles."},
   {id:"stormcall",   name:"Storm Call",      rarity:"rare",    cost:4, target:"tile",  color:"#63b3ed", desc:"Call a lightning strike — all units on target tile take 2 damage."},
+  // ── SUMMON spells ─────────────────────────────────────────────────────────
+  {id:"conscript",   name:"Conscript",       rarity:"common",  cost:2, target:"own",   color:"#68d391", tag:"summon", desc:"Summon 1 Soldier adjacent to a target friendly unit."},
+  {id:"bfsurge",     name:"Battlefield Surge",rarity:"common", cost:1, target:"tile",  color:"#68d391", tag:"summon", desc:"Summon 1 Soldier on any empty battlefield tile."},
+  {id:"dblenlist",   name:"Double Enlist",   rarity:"uncommon",cost:3, target:"own",   color:"#68d391", tag:"summon", desc:"Summon 2 Soldiers to your back row."},
+  {id:"flankguard",  name:"Flank Guard",     rarity:"uncommon",cost:2, target:"own",   color:"#9f7aea", tag:"summon", desc:"Summon 1 Archer adjacent to a target friendly unit."},
+  {id:"knightsvow",  name:"Knight's Vow",    rarity:"uncommon",cost:3, target:"own",   color:"#63b3ed", tag:"summon", desc:"Summon 1 Knight to your back row."},
+  {id:"xbwcompany",  name:"Crossbow Company",rarity:"rare",    cost:4, target:"own",   color:"#9f7aea", tag:"summon", desc:"Summon 2 Crossbowmen to your back row."},
+  {id:"ironlegion",  name:"Iron Legion",     rarity:"rare",    cost:5, target:"tile",  color:"#a0aec0", tag:"summon", desc:"Fill a target tile with up to 4 Soldiers."},
+  {id:"advanceguard",name:"Advance Guard",   rarity:"rare",    cost:4, target:"own",   color:"#4ade80", tag:"summon", desc:"Summon 1 Soldier to each of 3 front-row tiles."},
+  {id:"stormlines",  name:"Storm the Lines", rarity:"rare",    cost:4, target:"enemy", color:"#e05252", tag:"summon", desc:"Summon 2 Soldiers adjacent to a target enemy unit."},
+  {id:"warengine",   name:"War Engine",      rarity:"rare",    cost:5, target:"tile",  color:"#d69e2e", tag:"summon", desc:"Summon a Cavalier to a target battlefield tile."},
 ];
 const SPELL_MAX_COPIES={common:4,uncommon:2,rare:1};
 function makeRandomSpellBook() {
@@ -635,8 +720,19 @@ function makeRandomSpellBook() {
   }
   return book;
 }
-function loadSavedSpellBook(){try{var v=localStorage.getItem("spellbook");return v?JSON.parse(v):null;}catch(e){return null;}}
-function saveSpellBook(book){try{localStorage.setItem("spellbook",JSON.stringify(book));}catch(e){}}
+function loadAllSpellBooks(){try{var v=localStorage.getItem("spellbooks_v2");return v?JSON.parse(v):{};}catch(e){return {};}}
+function saveAllSpellBooks(all){try{localStorage.setItem("spellbooks_v2",JSON.stringify(all));}catch(e){}}
+function loadSavedSpellBook(){
+  // Try new format first, fall back to legacy
+  var all=loadAllSpellBooks();
+  var keys=Object.keys(all);
+  if(keys.length>0)return all[keys[0]];
+  try{var v=localStorage.getItem("spellbook");return v?JSON.parse(v):null;}catch(e){return null;}
+}
+function saveSpellBook(book){
+  // Legacy save kept for compatibility
+  try{localStorage.setItem("spellbook",JSON.stringify(book));}catch(e){}
+}
 const REF_ABILITY_DESC={
   charge:   {color:"#f6ad55",desc:"No summoning sickness — can act the turn it is summoned."},
   armor:    {color:"#63b3ed",desc:"Immune to ranged attacks that do not have Pierce."},
@@ -696,7 +792,10 @@ function ReferencePanel() {
                 <span style={{fontSize:7,color:"#4a5568"}}>max {SPELL_MAX_COPIES[e.rarity]}</span>
               </div>
             </div>
-            <div style={{fontSize:8,color:"#718096",marginBottom:1}}>{e.target}</div>
+            <div style={{fontSize:8,color:"#718096",marginBottom:1,display:"flex",gap:4,alignItems:"center"}}>
+              <span style={{color:e.tag==="summon"?"#4ade80":e.target==="tile"?"#f6ad55":"#68d391",background:e.tag==="summon"?"#4ade8018":e.target==="tile"?"#f6ad5518":"#68d39118",borderRadius:2,padding:"1px 4px",border:"1px solid "+(e.tag==="summon"?"#4ade8044":e.target==="tile"?"#f6ad5544":"#68d39144"),fontSize:7}}>{e.tag==="summon"?"summon":e.target==="tile"?"tile":"unit"}</span>
+              <span>{e.target}</span>
+            </div>
             <div style={{fontSize:9,color:"#8892a4",lineHeight:1.5}}>{e.desc}</div>
           </div>
         );})}
@@ -1288,56 +1387,84 @@ function InGameChatPanel({ lobbyChat }) {
 }
 
 function SpellBookSelect({current, onConfirm, onBack}) {
-  var saved=loadSavedSpellBook();
-  var [book,setBook]=React.useState(current&&current.length?current:(saved||[]));
+  var [book,setBook]=React.useState(current&&current.length?current:(loadSavedSpellBook()||[]));
+  var [bookName,setBookName]=React.useState("My Spell Book");
   var [search,setSearch]=React.useState("");
   var [tab,setTab]=React.useState("all");
+  var [savedBooks,setSavedBooks]=React.useState(function(){return loadAllSpellBooks();});
+  var [renamingKey,setRenamingKey]=React.useState(null);
+  var [renameVal,setRenameVal]=React.useState("");
   var RARITIES=["common","uncommon","rare"];
   var RARITY_COLOR={common:"#a0aec0",uncommon:"#63b3ed",rare:"#f6e05e"};
+  var TAG_COLOR={units:"#68d391",tiles:"#f6ad55"};
   var counts={};book.forEach(function(s){counts[s.id]=(counts[s.id]||0)+1;});
   var total=book.length;
   var q=search.trim().toLowerCase();
   var filtered=ALL_SPELLS.filter(function(s){
-    if(tab!=="all"&&s.rarity!==tab)return false;
+    if(tab==="units"&&(s.target==="tile"||s.tag==="summon"))return false;
+    if(tab==="tiles"&&s.target!=="tile")return false;
+    if(tab==="summon"&&s.tag!=="summon")return false;
+    if(tab!=="all"&&tab!=="units"&&tab!=="tiles"&&tab!=="summon"&&s.rarity!==tab)return false;
     if(q&&!s.name.toLowerCase().includes(q)&&!s.desc.toLowerCase().includes(q))return false;
     return true;
   });
   function addSpell(s){
-    var cur=counts[s.id]||0;
-    var max=SPELL_MAX_COPIES[s.rarity];
-    if(cur>=max){return;}
-    if(total>=20){return;}
+    var cur=counts[s.id]||0;var max=SPELL_MAX_COPIES[s.rarity];
+    if(cur>=max||total>=20)return;
     setBook(function(b){return[...b,{...s}];});
   }
   function removeSpell(s){
     setBook(function(b){var idx=b.findIndex(function(x){return x.id===s.id;});if(idx<0)return b;var n=b.slice();n.splice(idx,1);return n;});
   }
-  function doRandom(){var b=makeRandomSpellBook();setBook(b);}
+  function doRandom(){setBook(makeRandomSpellBook());}
   function doClear(){setBook([]);}
+  function doSave(){
+    if(!bookName.trim()||total<1)return;
+    var all={...savedBooks,[bookName.trim()]:book};
+    setSavedBooks(all);saveAllSpellBooks(all);saveSpellBook(book);
+    addLog&&void 0; // no-op
+  }
+  function doLoad(key){
+    setBook(savedBooks[key]||[]);setBookName(key);
+  }
+  function doDelete(key){
+    var all={...savedBooks};delete all[key];
+    setSavedBooks(all);saveAllSpellBooks(all);
+  }
+  function startRename(key){setRenamingKey(key);setRenameVal(key);}
+  function commitRename(key){
+    var nk=renameVal.trim();
+    if(!nk||nk===key){setRenamingKey(null);return;}
+    var all={...savedBooks,[nk]:savedBooks[key]};delete all[key];
+    setSavedBooks(all);saveAllSpellBooks(all);
+    if(bookName===key)setBookName(nk);
+    setRenamingKey(null);
+  }
   return (
     <div style={{minHeight:"100vh",background:"#0d0b08",display:"flex",flexDirection:"column",alignItems:"center",fontFamily:"Courier New,monospace",color:"#c8a96e",padding:"20px 12px",position:"relative",gap:10}}>
       <button onClick={onBack} style={{position:"absolute",top:16,left:16,background:"none",border:"1px solid #2a1e08",color:"#4a5568",borderRadius:3,padding:"5px 12px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:2}}>← BACK</button>
       <div style={{fontSize:9,color:"#4a3810",letterSpacing:5}}>BUILD YOUR SPELL BOOK</div>
       <div style={{fontSize:11,color:"#718096"}}>Choose 20 spells — common (max 4), uncommon (max 2), rare (max 1)</div>
-      <div style={{width:"100%",maxWidth:760,display:"flex",gap:12,flex:1,minHeight:0}}>
+      <div style={{width:"100%",maxWidth:960,display:"flex",gap:12,flex:1,minHeight:0}}>
         {/* Left: spell pool */}
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:6,minHeight:0}}>
           <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="search spells..." style={{background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"5px 8px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none",width:"100%",boxSizing:"border-box"}}/>
-          <div style={{display:"flex",gap:3}}>
-            {["all",...RARITIES].map(function(r){return(
-              <button key={r} onClick={function(){setTab(r);}} style={{flex:1,background:tab===r?"#1e2535":"#0a0c14",border:"1px solid "+(tab===r?"#4a5568":"#1e2535"),color:tab===r?RARITY_COLOR[r]||"#c8d0e0":"#4a5568",borderRadius:2,padding:"4px 0",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>{r.toUpperCase()}</button>
+          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+            {[["all","ALL","#c8d0e0"],["units","UNITS","#68d391"],["tiles","TILES","#f6ad55"],["summon","SUMMON","#4ade80"],...RARITIES.map(function(r){return[r,r.toUpperCase(),RARITY_COLOR[r]];})].map(function(t){var key=t[0],label=t[1],col=t[2];return(
+              <button key={key} onClick={function(){setTab(key);}} style={{background:tab===key?"#1e2535":"#0a0c14",border:"1px solid "+(tab===key?col+"88":"#1e2535"),color:tab===key?col:"#4a5568",borderRadius:2,padding:"3px 6px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>{label}</button>
             );})}
           </div>
           <div style={{overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:3}}>
             {filtered.map(function(s){
-              var cur=counts[s.id]||0;
-              var max=SPELL_MAX_COPIES[s.rarity];
-              var canAdd=cur<max&&total<20;
+              var cur=counts[s.id]||0;var max=SPELL_MAX_COPIES[s.rarity];var canAdd=cur<max&&total<20;
+              var tagLabel=s.tag==="summon"?"summon":s.target==="tile"?"tile":"unit";
+              var tagCol=s.tag==="summon"?"#4ade80":s.target==="tile"?"#f6ad55":"#68d391";
               return(
                 <div key={s.id} style={{background:"#0d0f1a",borderRadius:3,padding:"5px 8px",borderLeft:"3px solid "+s.color,display:"flex",justifyContent:"space-between",alignItems:"center",opacity:canAdd?1:0.5}}>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
+                    <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2,flexWrap:"wrap"}}>
                       <span style={{fontSize:10,fontWeight:"bold",color:s.color}}>{s.name}</span>
+                      <span style={{fontSize:7,color:tagCol,background:tagCol+"18",borderRadius:2,padding:"1px 4px",border:"1px solid "+tagCol+"44"}}>{tagLabel}</span>
                       <span style={{fontSize:8,color:RARITY_COLOR[s.rarity]||"#a0aec0"}}>{s.rarity}</span>
                       <span style={{fontSize:8,color:"#d69e2e"}}>{s.cost}pt</span>
                       <span style={{fontSize:8,color:"#718096"}}>{s.target}</span>
@@ -1351,11 +1478,11 @@ function SpellBookSelect({current, onConfirm, onBack}) {
             })}
           </div>
         </div>
-        {/* Right: current book */}
-        <div style={{width:240,display:"flex",flexDirection:"column",gap:6,minHeight:0}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontSize:10,color:"#4a5568",letterSpacing:2}}>YOUR BOOK</div>
-            <div style={{fontSize:11,color:total===20?"#4ade80":"#fb923c",fontWeight:"bold"}}>{total}/20</div>
+        {/* Centre: current book being edited */}
+        <div style={{width:220,display:"flex",flexDirection:"column",gap:6,minHeight:0}}>
+          <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
+            <input value={bookName} onChange={function(e){setBookName(e.target.value);}} placeholder="Book name..." style={{flex:1,background:"#0a0c14",border:"1px solid #2a3550",color:"#c8d0e0",borderRadius:3,padding:"4px 7px",fontFamily:"Courier New,monospace",fontSize:10,outline:"none"}}/>
+            <div style={{fontSize:11,color:total===20?"#4ade80":"#fb923c",fontWeight:"bold",flexShrink:0}}>{total}/20</div>
           </div>
           <div style={{overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:2}}>
             {book.length===0&&<div style={{fontSize:10,color:"#2a3550",padding:8}}>No spells added yet.</div>}
@@ -1373,7 +1500,38 @@ function SpellBookSelect({current, onConfirm, onBack}) {
             <button onClick={doRandom} style={{flex:1,background:"#0f1118",border:"1px solid #9f7aea55",color:"#9f7aea",borderRadius:3,padding:"7px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1}}>RANDOM</button>
             <button onClick={doClear} style={{flex:1,background:"#0f1118",border:"1px solid #c5303055",color:"#c53030",borderRadius:3,padding:"7px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9,letterSpacing:1}}>CLEAR</button>
           </div>
-          <button onClick={function(){if(total<1)return;onConfirm(book);}} disabled={total<1} style={{background:total>0?"#1a1208":"#0d0f1a",border:"1px solid "+(total>0?"#d69e2e44":"#1e2535"),color:total>0?"#d69e2e":"#2a3550",borderRadius:3,padding:"10px",cursor:total>0?"pointer":"not-allowed",fontFamily:"Courier New,monospace",fontSize:10,letterSpacing:2,flexShrink:0}}>SAVE &amp; RETURN{total<20?" ("+total+"/20)":""}</button>
+          <button onClick={function(){doSave();}} disabled={total<1||!bookName.trim()} style={{background:total>0&&bookName.trim()?"#0a1808":"#0d0f1a",border:"1px solid "+(total>0&&bookName.trim()?"#68d39144":"#1e2535"),color:total>0&&bookName.trim()?"#68d391":"#2a3550",borderRadius:3,padding:"8px",cursor:total>0&&bookName.trim()?"pointer":"not-allowed",fontFamily:"Courier New,monospace",fontSize:10,letterSpacing:2,flexShrink:0}}>💾 SAVE BOOK</button>
+          <button onClick={function(){if(total<1)return;onConfirm(book);}} disabled={total<1} style={{background:total>0?"#1a1208":"#0d0f1a",border:"1px solid "+(total>0?"#d69e2e44":"#1e2535"),color:total>0?"#d69e2e":"#2a3550",borderRadius:3,padding:"8px",cursor:total>0?"pointer":"not-allowed",fontFamily:"Courier New,monospace",fontSize:10,letterSpacing:2,flexShrink:0}}>USE THIS BOOK{total<20?" ("+total+"/20)":""}</button>
+        </div>
+        {/* Right: saved spell books */}
+        <div style={{width:200,display:"flex",flexDirection:"column",gap:6,minHeight:0}}>
+          <div style={{fontSize:9,color:"#4a5568",letterSpacing:3,flexShrink:0,borderBottom:"1px solid #1e2535",paddingBottom:4}}>SAVED BOOKS</div>
+          <div style={{overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:4}}>
+            {Object.keys(savedBooks).length===0&&<div style={{fontSize:9,color:"#2a3550",padding:"6px 0"}}>No saved books yet.</div>}
+            {Object.keys(savedBooks).map(function(key){
+              var bk=savedBooks[key];var isEditing=renamingKey===key;
+              return(
+                <div key={key} style={{background:"#0d0f1a",borderRadius:3,padding:"6px 8px",border:"1px solid #1e2535",display:"flex",flexDirection:"column",gap:4}}>
+                  {isEditing?(
+                    <div style={{display:"flex",gap:3}}>
+                      <input value={renameVal} onChange={function(e){setRenameVal(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")commitRename(key);if(e.key==="Escape"){setRenamingKey(null);}}} autoFocus style={{flex:1,background:"#0a0c14",border:"1px solid #4299e155",color:"#c8d0e0",borderRadius:2,padding:"2px 5px",fontFamily:"Courier New,monospace",fontSize:9,outline:"none"}}/>
+                      <button onClick={function(){commitRename(key);}} style={{background:"#4299e122",border:"none",color:"#4299e1",borderRadius:2,padding:"2px 6px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:9}}>✓</button>
+                    </div>
+                  ):(
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontSize:9,fontWeight:"bold",color:"#c8d0e0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{key}</div>
+                      <div style={{display:"flex",gap:2,flexShrink:0}}>
+                        <button onClick={function(){startRename(key);}} title="Rename" style={{background:"none",border:"none",color:"#4a5568",cursor:"pointer",fontSize:10,padding:"0 2px"}}>✎</button>
+                        <button onClick={function(){doDelete(key);}} title="Delete" style={{background:"none",border:"none",color:"#c53030",cursor:"pointer",fontSize:10,padding:"0 2px"}}>✕</button>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{fontSize:8,color:"#4a5568"}}>{bk.length} spells</div>
+                  <button onClick={function(){doLoad(key);}} style={{background:"#060e10",border:"1px solid #4299e133",color:"#4299e1",borderRadius:2,padding:"3px 6px",cursor:"pointer",fontFamily:"Courier New,monospace",fontSize:8,letterSpacing:1}}>LOAD &amp; EDIT</button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -1706,7 +1864,16 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     setBoard(prev => prev.map(row => row.map(cell =>
       cell.map(u => {
         if (u.owner !== player && !(u.neutral)) return u;
-        if (u.owner === player) return {...u, tapped:false, moved:false, sick:false, frozenAfterMove:false};
+        if (u.owner === player) {
+          var next = {...u, sick:false, frozenAfterMove:false};
+          // Tap cycle counter: decrement, only clear tapped when counter reaches 0
+          if(u.tapCycles&&u.tapCycles>1){next.tapCycles=u.tapCycles-1;next.tapped=true;}
+          else{next.tapped=false;next.tapCycles=0;}
+          // Move cycle counter: decrement, only allow movement when counter reaches 0
+          if(u.moveCycles&&u.moveCycles>1){next.moveCycles=u.moveCycles-1;next.moved=true;}
+          else{next.moved=false;next.moveCycles=0;next.bonusAbilities=(u.bonusAbilities||[]).filter(function(a){return a!=="immovable_temp";});}
+          return next;
+        }
         return u;
       })
     )));
@@ -1807,7 +1974,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           var sr2=bfTiles[ti][0],sc2=bfTiles[ti][1];
           if(n[sr2][sc2].length<4&&!n[sr2][sc2].some(function(u){return u.neutral;})){
             var nu=makeUnit(ev.spawn.typeId,"neutral");
-            nu.neutral=true;nu.label=ev.spawn.label;
+            nu.neutral=true;nu.label=ev.spawn.label;if(cycles>=4){nu.legendary=true;var legAbils=LEGENDARY_UNIT_ABILITIES[ev.spawn.label];if(legAbils){var tmp=nu;legAbils.forEach(function(a){tmp=addAbility(tmp,a);});nu=tmp;}}
             n[sr2][sc2].push(nu);
             spawned++;
             setTimeout(function(rr,cc,lbl){return function(){addLog("⚡ "+lbl+" spawns at "+tileName(rr,cc)+".","event");};}(sr2,sc2,nu.label),0);
@@ -2111,6 +2278,11 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       const target = board[r][c].find(function(u){return (u.owner!==cp||u.neutral)&&u.typeId!==0;});
       const targetIdx = board[r][c].indexOf(target);
       if (target) {
+        // Cavalier: block L-shape flank if target is in their encampment
+        var fdr=Math.abs(r-selected.r),fdc=Math.abs(c-selected.c);
+        var isFl=(fdr===1&&fdc===2)||(fdr===2&&fdc===1);
+        var inEncamp=(target.owner==="p1"&&r===0)||(target.owner==="p2"&&r===BOARD-1);
+        if(att.typeId===3&&isFl&&inEncamp){addLog("Flank blocked — cannot use L-shape attack on a unit in its encampment.","debuff");return;}
         const isRanged2=UNITS[att.typeId].abilities.includes("range")||(att.bonusAbilities||[]).includes("range");
         const defArmor2=UNITS[target.typeId].abilities.includes("armor")||(target.bonusAbilities||[]).includes("armor");
         const pierce2=UNITS[att.typeId].abilities.includes("pierce")||(att.bonusAbilities||[]).includes("pierce");
@@ -2199,8 +2371,11 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
     // Tap attacker — find by ID to avoid stale index issues
     var attIdxNow = n[fr][fc].findIndex(function(x){return x.id===att.id;});
-    if (att.typeId===3 && attIdxNow>=0 && !attDied && !isImmovable(att) && (fr!==tr||fc!==tc) && n[tr][tc].length<4) {
-      // Cavalier: remove from source tile and place on target tile
+    var dr2=Math.abs(tr-fr),dc3=Math.abs(tc-fc);
+    var isFlank=(dr2===1&&dc3===2)||(dr2===2&&dc3===1);
+    var targetEncamp=(def&&def.owner==="p1"&&tr===0)||(def&&def.owner==="p2"&&tr===BOARD-1);
+    if (att.typeId===3 && attIdxNow>=0 && !attDied && !isImmovable(att) && isFlank && !targetEncamp && n[tr][tc].length<4) {
+      // Cavalier: L-shape flank — advance to target tile
       var cavUnit = n[fr][fc].splice(attIdxNow,1)[0];
       n[tr][tc].push({...cavUnit,moved:true,tapped:true,voidstep:false});
     } else if (attIdxNow>=0) {
@@ -2451,13 +2626,13 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)-1};addLog("Weaken: -1 ATK to "+UNITS[u.typeId].name+".","debuff");
     } else if(id==="slowfoot"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
-      n[r][c][ui]={...u,moved:true};addLog("Slow Foot: "+UNITS[u.typeId].name+" cannot move this turn.","debuff");
+      n[r][c][ui]={...u,moved:true,moveCycles:2};addLog("Slow Foot: "+UNITS[u.typeId].name+" cannot move for 1 cycle.","debuff");
     } else if(id==="fumble"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       n[r][c][ui]={...u,atkBuff:(u.atkBuff||0)-2};addLog("Fumble: -2 ATK to "+UNITS[u.typeId].name+".","debuff");
     } else if(id==="exhaust"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
-      n[r][c][ui]={...u,tapped:true};addLog("Exhaust: "+UNITS[u.typeId].name+" tapped.","debuff");
+      n[r][c][ui]={...u,tapped:true,tapCycles:2};addLog("Exhaust: "+UNITS[u.typeId].name+" tapped for 1 cycle.","debuff");
     } else if(id==="rally"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
       n[r][c][ui]={...u,tapped:false,moved:false,sick:false};addLog("Rally: "+UNITS[u.typeId].name+" untapped.","buff");
@@ -2475,7 +2650,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       n[r][c][ui]={...u,shielded:true,spellFx:[...(u.spellFx||[]),"Shield Wall: blocks next hit"]};addLog("Shield Wall: "+UNITS[u.typeId].name+" shielded.","buff");
     } else if(id==="guardup"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba2=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba2,spellFx:[...(u.spellFx||[]),"Guard Up: Armor"]};addLog("Guard Up: Armor granted this turn.","buff");
+      var newU2=addAbility({...u},"armor");n[r][c][ui]={...newU2,spellFx:[...(u.spellFx||[]),"Guard Up: Armor"]};addLog("Guard Up: Armor granted this turn.","buff");
     } else if(id==="warcry2"){
       for(var rr=0;rr<BOARD;rr++)for(var cc2=0;cc2<BOARD;cc2++)n[rr][cc2]=n[rr][cc2].map(function(x){return x.owner===cp?{...x,atkBuff:(x.atkBuff||0)+1}:x;});
       addLog("War Howl: all friendly units +1 ATK.","buff");
@@ -2499,7 +2674,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if(own){n[own.r][own.c][own.i]={...n[own.r][own.c][own.i],hp:Math.min((n[own.r][own.c][own.i].maxHp||UNITS[n[own.r][own.c][own.i].typeId].hp),n[own.r][own.c][own.i].hp+2)};}
       addLog("Life Drain: 2 dmg dealt, 2 HP restored to friendly.","debuff");
     } else if(id==="massexhaust"){
-      n[r][c]=n[r][c].map(function(x){return (x.owner!==cp||x.neutral)?{...x,tapped:true}:x;});addLog("Mass Exhaust: all enemies on tile tapped.","debuff");
+      n[r][c]=n[r][c].map(function(x){return (x.owner!==cp||x.neutral)?{...x,tapped:true,tapCycles:2}:x;});addLog("Mass Exhaust: all enemies on tile tapped for 1 cycle.","debuff");
     } else if(id==="inspire"){
       n[r][c]=n[r][c].map(function(x){return x.owner===cp?{...x,tapped:false,moved:false,sick:false}:x;});addLog("Inspire: all friendly units on tile untapped.","buff");
     } else if(id==="teleport"){
@@ -2514,19 +2689,19 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       else{var sc2=c+1<BOARD&&n[r][c+1].length<4?c+1:c-1>=0&&n[r][c-1].length<4?c-1:-1;if(sc2>=0){n[r][sc2].push({...n[r][c].splice(ui,1)[0]});addLog("Shove: enemy pushed sideways.","debuff");}else addLog("No room to shove.");}
     } else if(id==="rootstrike"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
-      var ba4=[...(u.bonusAbilities||[]),"immovable_temp"];n[r][c][ui]={...u,bonusAbilities:ba4,moved:true};addLog("Root Strike: "+UNITS[u.typeId].name+" immovable this turn.","debuff");
+      var newU4=addAbility({...u},"immovable_temp");n[r][c][ui]={...newU4,moved:true,moveCycles:2};addLog("Root Strike: "+UNITS[u.typeId].name+" immovable for 1 cycle.","debuff");
     } else if(id==="marksman"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba5=[...(u.bonusAbilities||[]),"range"];n[r][c][ui]={...u,bonusAbilities:ba5,spellFx:[...(u.spellFx||[]),"Marksman: Range"]};addLog("Marksman: Range granted this turn.","buff");
+      var newU5=addAbility({...u},"range");n[r][c][ui]={...newU5,spellFx:[...(u.spellFx||[]),"Marksman: Range"]};addLog("Marksman: Range granted this turn.","buff");
     } else if(id==="blindshot"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       var ba6=(u.bonusAbilities||[]).filter(function(a){return a!=="range";});n[r][c][ui]={...u,bonusAbilities:ba6};addLog("Blind Shot: Range removed from "+UNITS[u.typeId].name+".","debuff");
     } else if(id==="stonewarden"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba7=[...(u.bonusAbilities||[]),"armor"];n[r][c][ui]={...u,bonusAbilities:ba7,hp:u.hp+2,maxHp:(u.maxHp||UNITS[u.typeId].hp)+2,spellFx:[...(u.spellFx||[]),"Stone Warden: Armor +2HP"]};addLog("Stone Warden: Armor and +2 HP.","buff");
+      var newU7=addAbility({...u,hp:u.hp+2,maxHp:(u.maxHp||UNITS[u.typeId].hp)+2},"armor");n[r][c][ui]={...newU7,spellFx:[...(u.spellFx||[]),"Stone Warden: Armor +2HP"]};addLog("Stone Warden: Armor and +2 HP.","buff");
     } else if(id==="piercearmor"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba8=[...(u.bonusAbilities||[]),"pierce"];n[r][c][ui]={...u,bonusAbilities:ba8,spellFx:[...(u.spellFx||[]),"Pierce Armor: Pierce"]};addLog("Pierce Armor: Pierce granted this turn.","buff");
+      var newU8=addAbility({...u},"pierce");n[r][c][ui]={...newU8,spellFx:[...(u.spellFx||[]),"Pierce Armor: Pierce"]};addLog("Pierce Armor: Pierce granted this turn.","buff");
     } else if(id==="deathstrike"){
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       if(u.typeId===0){addLog("Cannot target King.");return;}
@@ -2547,8 +2722,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       if(!u||u.owner===cp){addLog("Select an enemy.");return;}
       n[r][c][ui]={...u,owner:cp,dominion:true};addLog("Dominion: "+UNITS[u.typeId].name+" under your control this turn.","buff");
     } else if(id==="paralyze"){
-      for(var rr4=0;rr4<BOARD;rr4++)for(var cc5=0;cc5<BOARD;cc5++)n[rr4][cc5]=n[rr4][cc5].map(function(x){return x.owner!==cp?{...x,tapped:true}:x;});
-      addLog("Paralyze: all enemy units tapped.","debuff");
+      for(var rr4=0;rr4<BOARD;rr4++)for(var cc5=0;cc5<BOARD;cc5++)n[rr4][cc5]=n[rr4][cc5].map(function(x){return x.owner!==cp?{...x,tapped:true,tapCycles:2}:x;});
+      addLog("Paralyze: all enemy units tapped for 1 cycle.","debuff");
     } else if(id==="massrally"){
       for(var rr5=0;rr5<BOARD;rr5++)for(var cc6=0;cc6<BOARD;cc6++)n[rr5][cc6]=n[rr5][cc6].map(function(x){return x.owner===cp?{...x,tapped:false,moved:false,sick:false}:x;});
       addLog("Mass Rally: all friendly units untapped.","buff");
@@ -2564,7 +2739,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       return; // skip the normal resolveSpell finalization below
     } else if(id==="eagleeye"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      var ba9=[...(u.bonusAbilities||[]),"range","pierce"];n[r][c][ui]={...u,bonusAbilities:ba9};addLog("Eagle Eye: Range and Pierce granted permanently.","buff");
+      var newU9=addAbility(addAbility({...u},"range"),"pierce");n[r][c][ui]=newU9;addLog("Eagle Eye: Range and Pierce granted permanently.","buff");
     } else if(id==="blindfield"){
       for(var rr6=0;rr6<BOARD;rr6++)for(var cc7=0;cc7<BOARD;cc7++)n[rr6][cc7]=n[rr6][cc7].map(function(x){if(x.owner!==cp&&(UNITS[x.typeId].abilities.includes("range")||(x.bonusAbilities||[]).includes("range"))){var nba=(x.bonusAbilities||[]).filter(function(a){return a!=="range";});return {...x,bonusAbilities:nba,blindfield:2};}return x;});
       addLog("Blind Field: all enemy ranged units lose Range for 2 turns.","debuff");
@@ -2574,12 +2749,56 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       addLog("Call to Arms: "+placed+" Soldiers summoned.","buff");
     } else if(id==="phantom"){
       if(!u||u.owner!==cp){addLog("Select your unit.");return;}
-      // find adjacent tile and place 1hp soldier
       var placed2=false;var dirs2=[[0,1],[0,-1],[1,0],[-1,0]];
       for(var d2=0;d2<dirs2.length&&!placed2;d2++){var pr=r+dirs2[d2][0],pc=c+dirs2[d2][1];if(pr>=0&&pr<BOARD&&pc>=0&&pc<BOARD&&n[pr][pc].length<4){var ph=makeUnit(1,cp);ph.hp=1;ph.maxHp=1;ph.shielded=true;n[pr][pc].push(ph);placed2=true;}}
       addLog(placed2?"Phantom Guard: shield soldier summoned.":"No adjacent tile available.","buff");
+    } else if(id==="conscript"){
+      if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      var placed3=false;var dirs3=[[0,1],[0,-1],[1,0],[-1,0]];
+      for(var d3=0;d3<dirs3.length&&!placed3;d3++){var pr3=r+dirs3[d3][0],pc3=c+dirs3[d3][1];if(pr3>=0&&pr3<BOARD&&pc3>=0&&pc3<BOARD&&n[pr3][pc3].length<4){n[pr3][pc3].push(makeUnit(1,cp));placed3=true;}}
+      addLog(placed3?"Conscript: Soldier summoned adjacent.":"No adjacent space available.","buff");
+    } else if(id==="bfsurge"){
+      if(n[r][c].length>=4){addLog("Tile is full.");return;}
+      var bfRow=cp==="p1"?r:(r);
+      if(r===0||r===BOARD-1){addLog("Summon to a battlefield tile, not the back row.");return;}
+      n[r][c].push(makeUnit(1,cp));
+      addLog("Battlefield Surge: Soldier summoned at "+tileName(r,c)+".","buff");
+    } else if(id==="dblenlist"){
+      var br2=cp==="p1"?0:6;var pl4=0;
+      for(var bc2=0;bc2<BOARD&&pl4<2;bc2++){if(n[br2][bc2].length<4){n[br2][bc2].push(makeUnit(1,cp));pl4++;}}
+      addLog("Double Enlist: "+pl4+" Soldiers summoned.","buff");
+    } else if(id==="flankguard"){
+      if(!u||u.owner!==cp){addLog("Select your unit.");return;}
+      var placed5=false;var dirs5=[[0,1],[0,-1],[1,0],[-1,0]];
+      for(var d5=0;d5<dirs5.length&&!placed5;d5++){var pr5=r+dirs5[d5][0],pc5=c+dirs5[d5][1];if(pr5>=0&&pr5<BOARD&&pc5>=0&&pc5<BOARD&&n[pr5][pc5].length<4){n[pr5][pc5].push(makeUnit(6,cp));placed5=true;}}
+      addLog(placed5?"Flank Guard: Archer summoned adjacent.":"No adjacent space.","buff");
+    } else if(id==="knightsvow"){
+      var br3=cp==="p1"?0:6;var pl6=false;
+      for(var bc3=0;bc3<BOARD&&!pl6;bc3++){if(n[br3][bc3].length<4){n[br3][bc3].push(makeUnit(2,cp));pl6=true;}}
+      addLog(pl6?"Knight's Vow: Knight summoned to back row.":"Back row is full.","buff");
+    } else if(id==="xbwcompany"){
+      var br4=cp==="p1"?0:6;var pl7=0;
+      for(var bc4=0;bc4<BOARD&&pl7<2;bc4++){if(n[br4][bc4].length<4){n[br4][bc4].push(makeUnit(7,cp));pl7++;}}
+      addLog("Crossbow Company: "+pl7+" Crossbowmen summoned.","buff");
+    } else if(id==="ironlegion"){
+      var fill=4-n[r][c].length;var pl8=0;
+      for(var fi=0;fi<fill;fi++){n[r][c].push(makeUnit(1,cp));pl8++;}
+      addLog(pl8>0?"Iron Legion: "+pl8+" Soldiers fill the tile at "+tileName(r,c)+".":"Tile already full.","buff");
+    } else if(id==="advanceguard"){
+      var frontRow=cp==="p1"?1:5;var pl9=0;
+      for(var fc2=0;fc2<BOARD&&pl9<3;fc2++){if(n[frontRow][fc2].length<4){n[frontRow][fc2].push(makeUnit(1,cp));pl9++;}}
+      addLog("Advance Guard: "+pl9+" Soldiers placed on front row.","buff");
+    } else if(id==="stormlines"){
+      if(!u||u.owner===cp){addLog("Select an enemy.");return;}
+      var pl10=0;var dirs10=[[0,1],[0,-1],[1,0],[-1,0]];
+      for(var d10=0;d10<dirs10.length&&pl10<2;d10++){var pr10=r+dirs10[d10][0],pc10=c+dirs10[d10][1];if(pr10>=0&&pr10<BOARD&&pc10>=0&&pc10<BOARD&&n[pr10][pc10].length<4){var su=makeUnit(1,cp);su.sick=false;n[pr10][pc10].push(su);pl10++;}}
+      addLog("Storm the Lines: "+pl10+" Soldiers summoned adjacent to enemy.","buff");
+    } else if(id==="warengine"){
+      if(n[r][c].length>=4){addLog("Tile is full.");return;}
+      n[r][c].push(makeUnit(3,cp));
+      addLog("War Engine: Cavalier summoned at "+tileName(r,c)+".","buff");
     } else if(id==="fortresswall"){
-      for(var rr7=0;rr7<BOARD;rr7++)for(var cc9=0;cc9<BOARD;cc9++)n[rr7][cc9]=n[rr7][cc9].map(function(x){if(x.owner!==cp)return x;var nb=[...(x.bonusAbilities||[]),"armor"];return {...x,bonusAbilities:nb,hp:x.hp+2,maxHp:(x.maxHp||UNITS[x.typeId].hp)+2,shielded:true};});
+      for(var rr7=0;rr7<BOARD;rr7++)for(var cc9=0;cc9<BOARD;cc9++)n[rr7][cc9]=n[rr7][cc9].map(function(x){if(x.owner!==cp)return x;return {...addAbility({...x,hp:x.hp+2,maxHp:(x.maxHp||UNITS[x.typeId].hp)+2,shielded:true},"armor")};});
       addLog("Fortress Wall: all friendly units gain Armor, +2 HP, Shield.","buff");
     } else if(id==="resurrection"){
       // no unit target needed — log only (full implementation would track destroyed units)
@@ -2720,14 +2939,14 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
                       var twrSlot=cell.indexOf(twrUnit);
                       var oc=twrUnit.owner==="p1"?"#4299e1":twrUnit.owner==="p2"?"#fc8181":"#a07040";
                       var isSv=isSel&&selected.unitIdx===twrSlot;
-                      return <div style={{position:"absolute",inset:4,background:twrUnit.typeId===0?"#2a1f06":"#0f1118",border:"2px solid "+(isSv?"#f6e05e":oc+(twrUnit.tapped?"44":"99")),outline:isSv?"1px solid #f6e05e":"none",borderRadius:3,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",transform:twrUnit.tapped?"rotate(90deg)":"none",transition:"transform 0.2s ease",opacity:twrUnit.tapped?0.55:1}}
+                      return <div className={twrUnit.legendary?"unit-legendary":""} style={{position:"absolute",inset:4,background:twrUnit.typeId===0?"#2a1f06":"#0f1118",border:"2px solid "+(isSv?"#f6e05e":twrUnit.legendary?"#d69e2e":(oc+(twrUnit.tapped?"44":"99"))),outline:isSv?"1px solid #f6e05e":"none",borderRadius:3,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",transform:twrUnit.tapped?"rotate(90deg)":"none",transition:"transform 0.2s ease",opacity:twrUnit.tapped?0.55:1}}
                         onMouseEnter={function(e){setTooltip({u:twrUnit,x:e.clientX,y:e.clientY});}}
                         onMouseMove={function(e){setTooltip(function(h){return h?{...h,x:e.clientX,y:e.clientY}:null;});}}
                         onMouseLeave={function(){setTooltip(null);}}
                         onClick={function(e){e.stopPropagation();handleUnitClick(r,c,twrSlot);}}>
                         <div style={{position:"absolute",top:twrUnit.owner==="p2"?0:"auto",bottom:twrUnit.owner==="p1"?0:"auto",left:0,right:0,height:3,background:oc,opacity:twrUnit.tapped?0.35:0.9}}/>
-                        <div style={{fontSize:11,fontWeight:"bold",color:twrUnit.tapped?oc+"66":oc}}>TWR</div>
-                        <div style={{fontSize:9,color:twrUnit.hp<twrUnit.maxHp?"#fc8181":"#68d391"}}>{twrUnit.hp}</div>
+                        <div style={{fontSize:24,color:twrUnit.tapped?oc+"66":oc}}>{UNIT_ICON[twrUnit.typeId]||"?"}</div>
+                        <div style={{fontSize:13,color:(twrUnit.typeId===0?(twrUnit.owner==="p1"?p1Life:p2Life):twrUnit.hp)<(twrUnit.typeId===0?MAX_HP:twrUnit.maxHp)?"#fc8181":"#68d391"}}>{twrUnit.typeId===0?(twrUnit.owner==="p1"?p1Life:p2Life):twrUnit.hp}</div>
                         {(twrUnit.atkBuff||0)>0&&<div style={{fontSize:7,color:"#68d391"}}>+{twrUnit.atkBuff}</div>}
                       </div>;
                     })()
@@ -2741,16 +2960,17 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
                           onMouseMove={function(e){setTooltip(function(h){return h?{...h,x:e.clientX,y:e.clientY}:null;});}}
                           onMouseLeave={function(){setTooltip(null);}}
                           onClick={function(e){e.stopPropagation();handleUnitClick(r,c,slot);}}
+                          className={u.legendary?"unit-legendary":""}
                           style={{background:u.typeId===0?"#2a1f06":u.sick?"#1a1008":"#0f1118",
-                            border:"1px solid "+(isSv?"#f6e05e":u.sick?"#ed8936":oc+(u.tapped?"33":"77")),
+                            border:"1px solid "+(isSv?"#f6e05e":u.legendary?"#d69e2e":u.sick?"#ed8936":(oc+(u.tapped?"33":"77"))),
                             outline:isSv?"1px solid #f6e05e":"none",borderRadius:1,
                             display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                             cursor:"pointer",fontSize:5,overflow:"hidden",position:"relative",
                             transform:u.tapped?"rotate(90deg)":"none",transition:"transform 0.2s ease",
                             opacity:u.sick?0.6:u.tapped?0.55:1}}>
                           <div style={{position:"absolute",top:u.owner==="p2"||u.neutral?0:"auto",bottom:u.owner==="p1"?0:"auto",left:0,right:0,height:2,background:oc,opacity:u.tapped?0.35:0.85}}/>
-                          <div style={{fontWeight:"bold",fontSize:6,color:u.tapped?oc+"66":oc,lineHeight:1,marginTop:2}}>{UNITS[u.typeId]&&UNITS[u.typeId].short||"?"}</div>
-                          <div style={{fontSize:5,color:u.hp<u.maxHp?"#fc8181":"#68d391",lineHeight:1}}>{u.hp}</div>
+                          <div style={{fontWeight:"bold",fontSize:17,color:u.tapped?oc+"66":oc,lineHeight:1,marginTop:1}}>{UNIT_ICON[u.typeId]||"?"}</div>
+                          <div style={{fontSize:9,color:(u.typeId===0?(u.owner==="p1"?p1Life:p2Life):u.hp)<(u.typeId===0?MAX_HP:u.maxHp)?"#fc8181":"#68d391",lineHeight:1}}>{u.typeId===0?(u.owner==="p1"?p1Life:p2Life):u.hp}</div>
                           {(u.atkBuff||0)>0&&<div style={{fontSize:4,color:"#68d391"}}>+{u.atkBuff}</div>}
                         </div>
                       );
@@ -2866,9 +3086,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         </div>
       </div>
       {/* Tile tooltip */}
-      {tileTip&&!tooltip&&!btnTip&&<TileTip tip={tileTip}/>}
+      {tileTip&&!tooltip&&!btnTip&&<TileTip tip={tileTip} popup={!!(showEventPopup||lootPopup)}/>}
+
       {/* Unit tooltip */}
-      {tooltip&&<UnitTip u={tooltip.u} x={tooltip.x} y={tooltip.y} board={board} tileEffects={tileEffects} evFx={activeEventRef.current&&activeEventRef.current.effects||{}} deckTable={[...LOOT_COMMON,...LOOT_ELITE]}/>}
+      {tooltip&&<UnitTip u={tooltip.u} x={tooltip.x} y={tooltip.y} board={board} tileEffects={tileEffects} evFx={activeEventRef.current&&activeEventRef.current.effects||{}} deckTable={[...LOOT_COMMON,...LOOT_ELITE]} popup={!!(showEventPopup||lootPopup)}/>}
       {/* Btn tooltip */}
       {btnTip&&<BtnTip typeId={btnTip.typeId} x={btnTip.x} y={btnTip.y}/>}
       {/* Loot popup */}
