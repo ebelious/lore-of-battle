@@ -146,6 +146,7 @@ function canAttack(unit, fr, fc, tr, tc) {
   // If unit has flank ability, also allow L-shape attacks
   const hasFlank = (unit.bonusAbilities||[]).includes("flank") || (UNITS[unit.typeId]&&UNITS[unit.typeId].abilities||[]).includes("flank");
   if (hasFlank && ((dr===1&&dc===2)||(dr===2&&dc===1))) return true;
+  const shape = UNITS[unit.typeId].atkShape;
   var rb = unit.rangeBuff||0;
   if (shape === "same")     return cheby === 0;
   if (shape === "adjacent") return cheby <= 1;
@@ -215,8 +216,9 @@ const DECK_DWARVEN = [
   {id:"dw34",name:"Dragon Tailswipe",cycles:1,color:"#fc8181",desc:"Vyrathrax's tail sweeps everything leftward.",lore:"The tail was three hundred feet long. It swept left. Things that were on the right are now on the left. Things that were in the middle are now in pieces.",push:"left"},
   {id:"dw35",name:"Thrainor's Last Charge",cycles:1,color:"#f6e05e",desc:"The Forge-King charges one final time — all units surge forward.",lore:"He was seen running toward the largest of the Elder Wyrms with a broken hammer and a hundred years of fury. Nobody saw him stop.",push:"forward"},
   {id:"dw36",name:"The Deep Hoard",cycles:1,color:"#d69e2e",desc:"A forgotten deep treasury is breached — both gain +3 pts.",lore:"The Deepest Hoard was an old dwarven legend — a treasury so hidden that even the Forge-Kings forgot where it was. The dragons found it. The battle that followed was about more than territory.",instant(s){s.pts1+=3;s.pts2+=3;}},
-  {id:"dw37",name:"Emergency Allocation",cycles:1,color:"#d69e2e",desc:"War resources are redistributed — both gain +2 pts.",lore:"The Elder Assembly voted on resource allocation in the middle of the siege. Dwarves. The vote was nine to eight. In favour of survival. Narrowly.",instant(s){s.pts1+=2;s.pts2+=2;}},
-  {id:"dw38",name:"Dragon Tax",cycles:1,color:"#744210",desc:"Vyrathrax demands tribute — both commanders lose 1 pt.",lore:"The first thing Vyrathrax did after breaching the Forge was demand tribute. The dwarves laughed. Vyrathrax did not.",instant(s){s.pts1=Math.max(0,s.pts1-1);s.pts2=Math.max(0,s.pts2-1);}},
+  {id:"dw_tr1",name:"Thrainor's Cache",cycles:3,color:"#f6e05e",treasure:true,desc:"A hidden cache left by the Forge-King lies somewhere on the battlefield. Hold it for 3 cycles to claim the relic.",lore:"Thrainor buried a king's cache before the wyrms descended. He never returned for it. Somewhere beneath the ash it waits — unclaimed, unlabeled, patient as stone."},
+  {id:"dw_tr2",name:"Forge-King's Reliquary",cycles:3,color:"#c6a55c",treasure:true,desc:"An ancient reliquary is unearthed on the battlefield. Hold it for 3 cycles to claim its power.",lore:"The forges of Karak Azar produced not only weapons but memory. The reliquaries stored both — weapons and the will to use them. This one has been waiting a very long time."},
+  {id:"dw_tr3",name:"Azarim Vault Seal",cycles:3,color:"#d97706",treasure:true,desc:"A sealed vault fragment surfaces. Hold the ground for 3 cycles to break the seal and claim what's inside.",lore:"When the deep roads collapsed, some vaults were sealed to preserve their contents from the wyrms. The seals held. The question was always: held for whom?"},
   {id:"dw39",name:"Bone Tide",cycles:2,color:"#a0aec0",desc:"Skeletons of fallen dwarves claw up from the deep.",lore:"The dwarves of Karak Azar did not go quietly. They burned, they froze, they were crushed — and then some of them got back up anyway.",spawn:{typeId:1,label:"Forge Skeleton",count:2}},
   {id:"dw40",name:"Elder Wyrm Fragment",cycles:4,color:"#f6e05e",desc:"A shard of living Elder Wyrm consciousness stalks the field.",lore:"When Vyrathrax died, his consciousness didn't. It broke into pieces. The pieces wander. The pieces are still angry.",spawn:{typeId:5,label:"Wyrm Shard"}},
 ];
@@ -264,8 +266,9 @@ const DECK_DRAGON = [
   {id:"dr33",name:"Shadow Current",cycles:1,color:"#9f7aea",desc:"Sylvara's shadow-current pulls all units left.",lore:"The Shadow Current was Sylvara's oldest technique — a pull of darkness that moved armies the way a river moves dead leaves. Silently. Completely.",push:"left"},
   {id:"dr34",name:"Dragonfire Surge Forward",cycles:1,color:"#fc8181",desc:"Dragonfire channels forward — all units advance.",lore:"The fire moved forward. Everything near fire moves the same direction fire does, eventually.",push:"forward"},
   {id:"dr35",name:"Ancient Debt",cycles:1,color:"#d69e2e",desc:"Unpaid dragon tribute comes due — both gain +3 pts.",lore:"Dragons don't forget debts. The interest alone, after a century, was substantial. Payment was made. Largely in fear, but payment nonetheless.",instant(s){s.pts1+=3;s.pts2+=3;}},
-  {id:"dr36",name:"War Dividend",cycles:1,color:"#d69e2e",desc:"Seven days of war pay — both gain +2 pts.",lore:"The Fury lasted seven days. On day eight, the accountants emerged. Nobody had asked for accountants but here they were, tallying.",instant(s){s.pts1+=2;s.pts2+=2;}},
-  {id:"dr37",name:"Worldburner's Toll",cycles:1,color:"#744210",desc:"Vyrathrax claims his tithe — both lose 1 pt.",lore:"Every battle that occurred within three thousand miles of Vyrathrax was, technically, his battle. He charged accordingly.",instant(s){s.pts1=Math.max(0,s.pts1-1);s.pts2=Math.max(0,s.pts2-1);}},
+  {id:"dr_tr1",name:"Vyrathrax's Hidden Hoard",cycles:3,color:"#fc8181",treasure:true,desc:"A fragment of Vyrathrax's legendary hoard lies buried on the battlefield. Hold it for 3 cycles to claim its power.",lore:"No one accounted for all of the hoard. Vyrathrax moved pieces of it constantly, paranoid even by dragon standards. Entire rooms were buried and forgotten. This is one of those rooms."},
+  {id:"dr_tr2",name:"Dragonheart Shard",cycles:3,color:"#f6ad55",treasure:true,desc:"A Dragonheart shard pulses with ancient energy. Hold the ground for 3 cycles to absorb its power.",lore:"The stolen Dragonhearts shattered in the Fury. The shards landed everywhere. Each one still beats — not quite alive, not quite dead, exactly as dangerous as the original."},
+  {id:"dr_tr3",name:"Oath-Bound Cache",cycles:3,color:"#e05252",treasure:true,desc:"Something bound by the Oath of Ash has surfaced. Hold it for 3 cycles to break the binding and claim it.",lore:"The Oath of Ash bound more than just the dragons. Caches of power were locked beneath the battlefield — sealed against any but the worthy. The definition of 'worthy' has always been flexible."},
   {id:"dr38",name:"Dragonkin Host",cycles:2,color:"#fc8181",desc:"Two dragonkin warriors descend from the Fury.",lore:"Dragonkin were not dragons. They were what happened when dragons interacted too closely with the natural world for too long. Nobody asked the natural world how it felt about this.",spawn:{typeId:1,label:"Dragonkin",count:2}},
   {id:"dr39",name:"The Obsidian Knight",cycles:4,color:"#f6e05e",desc:"A legendary obsidian-armoured knight serves the Firstborn.",lore:"The Obsidian Knight was not a dragon. It was a human warrior who had served Vyrathrax so long that Vyrathrax's fire had changed them. They had stopped being flammable. They had started being fire.",spawn:{typeId:4,label:"Obsidian Knight"}},
   {id:"dr40",name:"The Siege Wyrm",cycles:4,color:"#c53030",desc:"A siege-class wyrm descends to the battlefield.",lore:"The siege wyrms were not the Firstborn. They were the Firstborn's weapons — creatures bred specifically for destroying fortifications. They had no name because nobody expected them to need one.",spawn:{typeId:5,label:"Siege Wyrm"}},
@@ -279,8 +282,7 @@ const DECK_CLANS = [
   {id:"cl04",name:"Ailsa's Blessing",cycles:2,color:"#68d391",desc:"The ghost of Ailsa Redveil graces 4 tiles.",lore:"Ailsa's ghost does not haunt Widow's Tor. She moves. She has been seen on all three Clan territories — always at crossroads, always pointing toward the path that costs less blood.",tileFx:"blessed"},
   // PUSH
   {id:"cl05",name:"Stormbreaker Falls",cycles:1,color:"#b794f4",desc:"The great stone Stormbreaker shatters — all units pushed to centre.",lore:"The Stormbreaker was the ancient standing stone at the centre of Highland territory. When Borin Thunderfist broke it with a single hammer blow, the shockwave was felt in three valleys.",push:"center"},
-  {id:"cl06",name:"Highland Gale",cycles:1,color:"#68d391",desc:"Storm winds scour the Highlands — all units swept rightward.",lore:"The Stormcrag gales have no preference. They pick up everything and carry it rightward — toward the coast, toward the sea, toward whatever is on the right of the map.",push:"right"},
-  {id:"cl07",name:"Crag Undertow",cycles:1,color:"#718096",desc:"A crag-gorge wind reversal — all units pulled leftward.",lore:"The gorge between Black Tor and Red Crag creates a reversal wind that the Clans learned to use in battle centuries ago. Everything eventually ends up on the left side of the gorge.",push:"left"},
+  {id:"cl08",name:"Clan Charge",cycles:1,color:"#f6ad55",desc:"Highland battle cry drives all warriors forward.",lore:"The Thunderfist war-cry was heard three valleys away on a still day. On a windy day it crossed the range. When three clans cried at once, rocks moved.",push:"forward"},
   {id:"cl08",name:"Thunderfist Charge",cycles:1,color:"#e05252",desc:"Clan Thunderfist's charge drives all units forward.",lore:"Clan Thunderfist did not believe in tactics. They believed in being in front of the other side before the other side could think about where they wanted to be.",push:"forward"},
   // BUFFS / DEBUFFS
   {id:"cl09",name:"War Drums of Redveil",cycles:2,color:"#e05252",desc:"Redveil war drums beat — all units +1 ATK.",lore:"The Redveil drums were made from the hides of the first enemies they defeated. The drums remembered. When they played, everyone in earshot remembered too.",effects:{atkBonus:1}},
@@ -318,6 +320,9 @@ const DECK_CLANS = [
   {id:"cl38",name:"Siege Costs",cycles:1,color:"#744210",desc:"Extended siege drains the clans — both lose 1 pt.",lore:"Nobody in the Stormcrags had ever calculated the cost of a siege. They did once, in the third year of the Black Crag siege. The number they got made several people sit down and not speak for some time.",instant(s){s.pts1=Math.max(0,s.pts1-1);s.pts2=Math.max(0,s.pts2-1);}},
   {id:"cl39",name:"Crossbow Company",cycles:3,color:"#f6ad55",desc:"A Redveil crossbow company deploys.",lore:"The Redveil crossbow company were technically mercenaries. They worked exclusively for Redveil. They charged twice what anyone else charged. They were worth it.",spawn:{typeId:7,label:"Redveil Crossbow"}},
   {id:"cl40",name:"The Wandering Chieftain",cycles:4,color:"#f6e05e",desc:"An exiled Highland Chieftain returns with legendary authority.",lore:"The exile lasted twelve years. When the Wandering Chieftain came back, nobody challenged their return. The first person to try had been left-handed. Nobody mentioned this.",spawn:{typeId:5,label:"Wandering Chief"}},
+  {id:"cl_tr1",name:"Ailsa's Hidden Chest",cycles:3,color:"#68d391",treasure:true,desc:"Something Ailsa hid before the fall lies buried on the battlefield. Hold it for 3 cycles to claim what's inside.",lore:"Ailsa hid more than her grief on that mountain. Everything she didn't want found when she was gone — she buried it first. The directions died with her."},
+  {id:"cl_tr2",name:"Redveil War Cache",cycles:3,color:"#fc8181",treasure:true,desc:"A Redveil battle cache is uncovered. Hold the ground for 3 cycles to claim its contents.",lore:"The Redveil cached weapons, armour, and provisions across every battlefield they ever fought on. Most were never retrieved. The clan was not known for living long enough to come back."},
+  {id:"cl_tr3",name:"Chieftain's Burial Relic",cycles:3,color:"#f6ad55",treasure:true,desc:"A chieftain's burial relic has surfaced. Hold the ground for 3 cycles to inherit its blessing.",lore:"Highland burial rites included three items in the grave — one for the land, one for the gods, one for whoever was brave or foolish enough to dig them up later."},
 ];
 
 const DECK_CRYPT = [
@@ -358,8 +363,6 @@ const DECK_CRYPT = [
   {id:"cr29",name:"Engine Surge",cycles:2,color:"#e05252",desc:"The Engine's power pulses — all units +1 ATK.",lore:"The Engine surged unpredictably. When it did, everything in Vaelorath became briefly, uncomfortably more powerful.",effects:{atkBonus:1}},
   {id:"cr30",name:"Death Endurance",cycles:2,color:"#68d391",desc:"Death proximity hardens all units — +1 HP.",lore:"After enough time in the Crypt, the concept of being killable becomes abstract. Things near the Crypt become difficult to end — not immortal, but genuinely inconvenienced by attempts at killing.",effects:{hpBonus:1}},
   {id:"cr31",name:"Unending Scream",cycles:1,color:"#c53030",desc:"The Engine's destruction-scream echoes — all units +2 ATK.",lore:"The scream was technically a frequency — a sound that only living beings could hear, that the Engine emitted when it failed. It made everyone nearby want to fight. It was very effective.",effects:{atkBonus:2}},
-  {id:"cr32",name:"Mountain Crack",cycles:1,color:"#b794f4",desc:"Vaelorath tears itself apart — all units driven inward.",lore:"The Necropolis was not built to last indefinitely. The Synod planned for it to last until they ascended, at which point lasting would become somebody else's problem.",push:"center"},
-  {id:"cr33",name:"Crypt Current",cycles:1,color:"#9f7aea",desc:"A soul-current sweeps through — all units dragged right.",lore:"The soul-current moved clockwise in Vaelorath. Counterclockwise in the outer chambers. In the field, it moved right. The souls had preferences.",push:"right"},
   {id:"cr34",name:"Deathless Drift",cycles:1,color:"#a0aec0",desc:"The Deathless shift leftward without volition.",lore:"The Deathless drifted. They did not choose to go left. They did not choose anything. They drifted leftward the way smoke drifts toward windows — purposelessly, entirely.",push:"left"},
   {id:"cr35",name:"Ascension Pull",cycles:1,color:"#c53030",desc:"The Engine's ascension impulse drives all forward.",lore:"Even broken, the Engine's drive toward ascension infected everything nearby. Forward. Always forward. Into the machine. Into the purpose.",push:"forward"},
   {id:"cr36",name:"Harvested Millennia",cycles:1,color:"#d69e2e",desc:"Nine centuries of harvested power releases — both gain +3 pts.",lore:"Nine hundred years of soul-harvesting produced a quantity of stored power that, released all at once, was enough to change local geography. Both sides caught some of it.",instant(s){s.pts1+=3;s.pts2+=3;}},
@@ -367,6 +370,9 @@ const DECK_CRYPT = [
   {id:"cr38",name:"Eternal Debt",cycles:1,color:"#744210",desc:"The Engine's debt falls on all — both lose 1 pt.",lore:"The Engine of Ascension was promised things that were never delivered. The debt accumulated. It was paid in other currencies.",instant(s){s.pts1=Math.max(0,s.pts1-1);s.pts2=Math.max(0,s.pts2-1);}},
   {id:"cr39",name:"Bone Cavalry",cycles:3,color:"#a0aec0",desc:"Skeletal cavalry from the Crypt's deep stables.",lore:"The horses died in the outer stables when the cold came. They rose with everything else. They are still horses. Sort of.",spawn:{typeId:3,label:"Bone Cavalry"}},
   {id:"cr40",name:"Lamentation's Voice",cycles:4,color:"#f6e05e",desc:"Maelthas's scepter Lamentation takes its own form on the field.",lore:"Lamentation wept. Constantly. The black diamond wept black tears and they never dried. When it woke without Maelthas's hand on it, the weeping became louder. It had apparently been holding back.",spawn:{typeId:5,label:"Lamentation's Voice"}},
+  {id:"cr_tr1",name:"Synod's Sealed Cache",cycles:3,color:"#9f7aea",treasure:true,desc:"A cache sealed by one of the Nine lies hidden on the battlefield. Hold it for 3 cycles to break the seal.",lore:"Each of the Nine sealed a private cache before the Night of Betrayal. Each cache was hidden from the other eight. The hiding places were elaborate. The paranoia was professional."},
+  {id:"cr_tr2",name:"Soul-Bound Relic",cycles:3,color:"#b794f4",treasure:true,desc:"A soul-bound artifact from the Necropolis is buried here. Hold the ground for 3 cycles to claim its power.",lore:"The Synod bound power into objects the way other people save gold. The binding held long after the binders ended. The objects are patient. They always were."},
+  {id:"cr_tr3",name:"Maelthas's Buried Crown",cycles:3,color:"#f6e05e",treasure:true,desc:"The Emperor-King's crown lies buried. Hold the ground for 3 cycles and take the crown's legacy.",lore:"Maelthas buried the crown before Lamentation took him. He said he did not need it. The crown disagreed. It has been waiting for someone to agree with it."},
 ];
 
 const DECK_LAMENT = [
@@ -412,8 +418,9 @@ const DECK_LAMENT = [
   {id:"hl34",name:"Niflhel Pulls",cycles:1,color:"#63b3ed",desc:"The Spear of Final Winter draws all things leftward.",lore:"Niflhel pulled the world toward itself the way winter pulls warmth — inexorably, without preference for what it took. Everything moved left in its presence.",push:"left"},
   {id:"hl35",name:"Kael's Charge",cycles:1,color:"#f6ad55",desc:"Kael charges through the Lament — all units surge forward.",lore:"Kael never retreated. Not once in the Glacier. Not when the frost wraiths came. Not when the corridors showed her own frozen corpse. She kept going forward until she found what she was looking for.",push:"forward"},
   {id:"hl36",name:"Lament's Treasure",cycles:1,color:"#d69e2e",desc:"Ancient frozen wealth surfaces — both gain +3 pts.",lore:"The glacier preserves everything. Entire cities, when Hrímveig was at full power. Cities have significant treasury deposits. Occasionally one surfaces in the spring thaw.",instant(s){s.pts1+=3;s.pts2+=3;}},
-  {id:"hl37",name:"Two Voices",cycles:1,color:"#d69e2e",desc:"The duet beneath the ice briefly harmonises — both gain +2 pts.",lore:"Some nights, the two voices singing beneath the ice almost harmonise. In those moments, something that might be hope surfaces in anyone nearby. It passes. But it was there.",instant(s){s.pts1+=2;s.pts2+=2;}},
-  {id:"hl38",name:"The First Frost's Debt",cycles:1,color:"#744210",desc:"The primordial cold demands — both lose 1 pt.",lore:"The First Frost predated the concept of exchange. But it learned. It learned that things taken from the living could be demanded, and that the demand carried the threat of what it had always been.",instant(s){s.pts1=Math.max(0,s.pts1-1);s.pts2=Math.max(0,s.pts2-1);}},
+  {id:"hl_tr1",name:"Eldrin's Frozen Cache",cycles:3,color:"#f6ad55",treasure:true,desc:"Something Eldrin buried in the glacier before the Throne lies here. Hold it for 3 cycles to thaw what's inside.",lore:"Eldrin left things buried in the ice — warmth held in objects, in case the glacier swallowed him before he could use it. He was right to prepare. He was wrong to think preparation was enough."},
+  {id:"hl_tr2",name:"Shard of First Frost",cycles:3,color:"#63b3ed",treasure:true,desc:"A fragment of the First Frost's true form lies frozen here. Hold the ground for 3 cycles to absorb its power.",lore:"The First Frost was not always Hrímveig. Before her there was simply cold — the cold that preceded the concept of cold. Shards of that original cold still exist. They have a very simple philosophy."},
+  {id:"hl_tr3",name:"Niflhel's Broken Fragment",cycles:3,color:"#9f7aea",treasure:true,desc:"A shard of the Spear of Final Winter lies here. Hold it for 3 cycles to claim the spear's legacy.",lore:"Niflhel shattered when it entered Hrímveig. The pieces scattered. Each piece remembers the spear's purpose — to end the long argument of winter versus warmth, permanently, in winter's favour."},
   {id:"hl39",name:"Niflhel Fragment",cycles:4,color:"#f6e05e",desc:"A shard of the Spear of Final Winter rises.",lore:"The shards of Niflhel were scattered across the Glacier of Shattered Vows when Hrímveig drove it into herself. Each shard retained purpose. The purpose was the end of things.",spawn:{typeId:5,label:"Niflhel Shard"}},
   {id:"hl40",name:"Broken Daughter",cycles:4,color:"#9f7aea",desc:"Hrímveig's consciousness briefly manifests on the field.",lore:"She does not fully wake. A fragment surfaces — enough to move, enough to remember Niflhel and Eldrin and the choice she made at the Throne of Absolute Zero. It is enough to be dangerous.",spawn:{typeId:4,label:"Hrímveig's Echo"}},
 ];
@@ -1643,6 +1650,23 @@ function DiceScreen({ vsMode, onDone }) {
 }
 
 // ─── Main Game Component ──────────────────────────────────────────────────────
+const TREASURE_BUFFS=[
+  {id:"atk1",   name:"War Banner",       color:"#f6ad55",desc:"All your units +1 ATK each turn.",       apply:function(state){state.atkBonus=(state.atkBonus||0)+1;}},
+  {id:"arcprc", name:"Archer's Vow",     color:"#68d391",desc:"All your Archers gain Pierce.",           apply:function(state){state.archerPierce=true;}},
+  {id:"spell1", name:"Tome of Whispers", color:"#b794f4",desc:"Draw 1 free spell each turn.",           apply:function(state){state.freeSpell=(state.freeSpell||0)+1;}},
+  {id:"tilex",  name:"Terrain Master",   color:"#f6e05e",desc:"Cast a random tile effect each cycle.",  apply:function(state){state.tileCast=true;}},
+  {id:"armor",  name:"Iron Ward",        color:"#63b3ed",desc:"All your units gain Armor.",              apply:function(state){state.globalArmor=true;}},
+  {id:"soldr",  name:"Endless Levy",     color:"#c6a55c",desc:"Summon a free Soldier each turn.",       apply:function(state){state.freeSoldier=true;}},
+  {id:"archfr", name:"Quiver Eternal",   color:"#9f7aea",desc:"Summon a free Archer each turn.",        apply:function(state){state.freeArcher=true;}},
+  {id:"heal2",  name:"Living Spring",    color:"#68d391",desc:"Recover 2 HP each cycle.",               apply:function(state){state.healPerCycle=2;}},
+  {id:"gstl",   name:"Shadow Mantle",    color:"#4a5568",desc:"Grant a random friendly unit Stealth each turn.", apply:function(state){state.grantStealth=true;}},
+  {id:"grange", name:"Farseeker Stone",  color:"#9f7aea",desc:"Grant a random friendly unit Range each turn.", apply:function(state){state.grantRange=true;}},
+  {id:"gflank", name:"Warlord's Brand",  color:"#d69e2e",desc:"Grant a random friendly unit Flank each turn.", apply:function(state){state.grantFlank=true;}},
+  {id:"pts2",   name:"Treasury Seal",    color:"#f6e05e",desc:"+2 bonus points each turn.",              apply:function(state){state.bonusPts=2;}},
+];
+
+function getRandomTreasureBuff(){return TREASURE_BUFFS[Math.floor(Math.random()*TREASURE_BUFFS.length)];}
+
 function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn, myOnlineRole, lobbyChat }) {
   var deck = chosenDeck || THEME_DECKS[0];
   var spellBook = (chosenSpellBook&&chosenSpellBook.length) ? chosenSpellBook : makeRandomSpellBook();
@@ -1689,6 +1713,18 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   const [selected, setSelected] = useState(null); // {r,c,unitIdx}
   const [log, setLog] = useState([{msg:"Game started!",tag:"default"}]);
   const [winner, setWinner] = useState(null);
+  const [activeTreasure, setActiveTreasure] = useState(null); // {r,c,buff} — hidden tile, buff chosen when placed
+  const [treasureHolder, setTreasureHolder] = useState(null); // "p1" | "p2" | null
+  const [treasureHoldCycles, setTreasureHoldCycles] = useState(0);
+  const [treasureRevealed, setTreasureRevealed] = useState(false);
+  const [p1KingBuff, setP1KingBuff] = useState(null); // {id,name,color,desc}
+  const [p2KingBuff, setP2KingBuff] = useState(null);
+  const treasureRef = useRef(null); // sync with activeTreasure for closures
+  const treasureHolderRef = useRef(null);
+  const treasureHoldCyclesRef = useRef(0);
+  treasureRef.current = activeTreasure;
+  treasureHolderRef.current = treasureHolder;
+  treasureHoldCyclesRef.current = treasureHoldCycles;
   // Check if life loss should trigger a win — only if king is outside encampment
   function checkLifeWin(loser, newLife, boardSnap) {
     if (newLife > 0) return;
@@ -1726,7 +1762,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
   // ── Online sync ───────────────────────────────────────────────────────────
   var onlineSyncRef = useRef(null);
-  onlineSyncRef.current = {board,tileEffects,p1Life,p2Life,p1Pts,p2Pts,p1MaxPts,p2MaxPts,p1Unlocked,p2Unlocked,p1Hand,p2Hand,phase,cycleNum,groundItems,winner,activeEvent,eventCyclesLeft};
+  onlineSyncRef.current = {board,tileEffects,p1Life,p2Life,p1Pts,p2Pts,p1MaxPts,p2MaxPts,p1Unlocked,p2Unlocked,p1Hand,p2Hand,phase,cycleNum,groundItems,winner,activeEvent,eventCyclesLeft,p1KingBuff,p2KingBuff,activeTreasure,treasureHolder,treasureHoldCycles};
   var onlineConnRef = useRef(onlineConn);
   onlineConnRef.current = onlineConn;
 
@@ -1748,6 +1784,9 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         groundItems:gSer,winner:s.winner,
         eventCyclesLeft:s.eventCyclesLeft,
         activeEvent:evSer,
+        p1KingBuff:s.p1KingBuff||null,p2KingBuff:s.p2KingBuff||null,
+        activeTreasure:s.activeTreasure?{r:s.activeTreasure.r,c:s.activeTreasure.c,buff:{id:s.activeTreasure.buff.id,name:s.activeTreasure.buff.name,color:s.activeTreasure.buff.color,desc:s.activeTreasure.buff.desc}}:null,
+        treasureHolder:s.treasureHolder||null,treasureHoldCycles:s.treasureHoldCycles||0,
       }});
     }catch(e){}
   }
@@ -1781,6 +1820,14 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
         setEventCyclesLeft(s.eventCyclesLeft||0);
         if(s.activeEvent!=null){setActiveEvent(s.activeEvent);activeEventRef.current=s.activeEvent;}
         else if(s.activeEvent===null){setActiveEvent(null);activeEventRef.current=null;}
+        if(s.p1KingBuff!==undefined)setP1KingBuff(s.p1KingBuff);
+        if(s.p2KingBuff!==undefined)setP2KingBuff(s.p2KingBuff);
+        if(s.activeTreasure!==undefined){
+          var atRestored=s.activeTreasure?{...s.activeTreasure,buff:{...s.activeTreasure.buff,apply:TREASURE_BUFFS.find(function(b){return b.id===s.activeTreasure.buff.id;})||{}}}:null;
+          setActiveTreasure(atRestored);treasureRef.current=atRestored;
+        }
+        if(s.treasureHolder!==undefined){setTreasureHolder(s.treasureHolder);treasureHolderRef.current=s.treasureHolder;}
+        if(s.treasureHoldCycles!==undefined){setTreasureHoldCycles(s.treasureHoldCycles);treasureHoldCyclesRef.current=s.treasureHoldCycles;}
       }
       if(msg.type==="SHOW_EVENT_POPUP"){
         if(msg.ev){setActiveEvent(msg.ev);activeEventRef.current=msg.ev;}
@@ -1868,6 +1915,8 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
   function untapPlayer(player) {
     setAttacksUsedMap({});
+    // Apply per-turn King buff effects
+    var kbuff=player==="p1"?p1KingBuff:p2KingBuff;
     setBoard(prev => prev.map(row => row.map(cell =>
       cell.map(u => {
         if (u.owner !== player && !(u.neutral)) return u;
@@ -1879,11 +1928,40 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           // Move cycle counter: decrement, only allow movement when counter reaches 0
           if(u.moveCycles&&u.moveCycles>1){next.moveCycles=u.moveCycles-1;next.moved=true;}
           else{next.moved=false;next.moveCycles=0;next.bonusAbilities=(u.bonusAbilities||[]).filter(function(a){return a!=="immovable_temp";});}
+          // King buff: global Armor
+          if(kbuff&&kbuff.id==="armor") next=addAbility(next,"armor");
           return next;
         }
         return u;
       })
     )));
+    // Per-turn bonuses that don't require board iteration
+    if(kbuff){
+      if(kbuff.id==="pts2"){if(player==="p1")setP1Pts(function(p){return p+2;});else setP2Pts(function(p){return p+2;});}
+      if(kbuff.id==="freeSpell"){setTimeout(function(){if(typeof drawSpell==="function")drawSpell();},0);}
+      if(kbuff.id==="soldr"){
+        var soldrRow=player==="p1"?1:BOARD-2;var soldrPlaced=false;
+        setBoard(function(prev){var nb=cloneBoard(prev);for(var c2=0;c2<BOARD;c2++){if(nb[soldrRow][c2].length<4){nb[soldrRow][c2].push(makeUnit(1,player));soldrPlaced=true;break;}}return nb;});
+        setTimeout(function(){if(soldrPlaced)addLog("★ King buff: free Soldier summoned.","buff");},0);
+      }
+      if(kbuff.id==="archfr"){
+        var archRow=player==="p1"?1:BOARD-2;var archPlaced=false;
+        setBoard(function(prev){var nb=cloneBoard(prev);for(var c2=0;c2<BOARD;c2++){if(nb[archRow][c2].length<4){nb[archRow][c2].push(makeUnit(6,player));archPlaced=true;break;}}return nb;});
+        setTimeout(function(){if(archPlaced)addLog("★ King buff: free Archer summoned.","buff");},0);
+      }
+      if(kbuff.id==="gstl"){
+        setBoard(function(prev){var nb=cloneBoard(prev);var units2=[];for(var r2=0;r2<BOARD;r2++)for(var c2=0;c2<BOARD;c2++){for(var i2=0;i2<nb[r2][c2].length;i2++){if(nb[r2][c2][i2].owner===player&&!nb[r2][c2][i2].neutral)units2.push({r:r2,c:c2,i:i2});}}if(units2.length>0){var pick2=units2[Math.floor(Math.random()*units2.length)];nb[pick2.r][pick2.c][pick2.i]=addAbility(nb[pick2.r][pick2.c][pick2.i],"stealth");}return nb;});
+        setTimeout(function(){addLog("★ King buff: a unit gains Stealth.","buff");},0);
+      }
+      if(kbuff.id==="grange"){
+        setBoard(function(prev){var nb=cloneBoard(prev);var units3=[];for(var r3=0;r3<BOARD;r3++)for(var c3=0;c3<BOARD;c3++){for(var i3=0;i3<nb[r3][c3].length;i3++){if(nb[r3][c3][i3].owner===player&&!nb[r3][c3][i3].neutral)units3.push({r:r3,c:c3,i:i3});}}if(units3.length>0){var pick3=units3[Math.floor(Math.random()*units3.length)];nb[pick3.r][pick3.c][pick3.i]=addAbility(nb[pick3.r][pick3.c][pick3.i],"range");}return nb;});
+        setTimeout(function(){addLog("★ King buff: a unit gains Range.","buff");},0);
+      }
+      if(kbuff.id==="gflank"){
+        setBoard(function(prev){var nb=cloneBoard(prev);var units4=[];for(var r4=0;r4<BOARD;r4++)for(var c4=0;c4<BOARD;c4++){for(var i4=0;i4<nb[r4][c4].length;i4++){if(nb[r4][c4][i4].owner===player&&!nb[r4][c4][i4].neutral)units4.push({r:r4,c:c4,i:i4});}}if(units4.length>0){var pick4=units4[Math.floor(Math.random()*units4.length)];nb[pick4.r][pick4.c][pick4.i]=addAbility(nb[pick4.r][pick4.c][pick4.i],"flank");}return nb;});
+        setTimeout(function(){addLog("★ King buff: a unit gains Flank.","buff");},0);
+      }
+    }
   }
 
   function runEventPhase() {
@@ -1959,6 +2037,25 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     const cycles = ev.cycles || 1;
     setEventCyclesLeft(cycles); eventCyclesRef.current = cycles;
 
+    // Treasure event: place a hidden treasure on a random mid-field tile
+    if(ev.treasure){
+      var tr=2+Math.floor(Math.random()*3);
+      var tc=Math.floor(Math.random()*BOARD);
+      var buff=getRandomTreasureBuff();
+      setActiveTreasure({r:tr,c:tc,buff:buff});
+      treasureRef.current={r:tr,c:tc,buff:buff};
+      setTreasureHolder(null);treasureHolderRef.current=null;
+      setTreasureHoldCycles(0);treasureHoldCyclesRef.current=0;
+      setTreasureRevealed(false);
+      addLog("⚠ A treasure is hidden somewhere on the battlefield! Occupy the tile for 3 cycles to claim it.","event");
+      setShowEventPopup(true);
+      popupCbRef.current=startNextCycle;
+      var evSer={id:ev.id,name:ev.name,desc:ev.desc+"  ★ Treasure hidden on battlefield — hold for 3 cycles.",lore:ev.lore,color:ev.color||"#d69e2e",cycles:ev.cycles};
+      sendOnline({type:"SHOW_EVENT_POPUP",ev:evSer});
+      setTimeout(function(){sendState();},120);
+      return;
+    }
+
     // Apply instant effects
     if (ev.instant) {
       const s = { pts1: 0, pts2: 0 };
@@ -2032,6 +2129,40 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
   function startNextCycle() {
     setShowEventPopup(false);
     sendOnline({type:"HIDE_EVENT_POPUP"});
+
+    // Treasure hold check: if a treasure is active, check who occupies it
+    var tr=treasureRef.current;
+    if(tr){
+      var latestBoard=board; // read current board from closure (not inside setBoard)
+      var hasP1=latestBoard[tr.r][tr.c].some(function(u){return u.owner==="p1"&&!u.neutral;});
+      var hasP2=latestBoard[tr.r][tr.c].some(function(u){return u.owner==="p2"&&!u.neutral;});
+      var holder=hasP1?"p1":hasP2?"p2":null;
+      var prevHolder=treasureHolderRef.current;
+      var holdCycles=treasureHoldCyclesRef.current;
+      if(holder&&holder===prevHolder){
+        var newHold=holdCycles+1;
+        setTreasureHoldCycles(newHold);treasureHoldCyclesRef.current=newHold;
+        setTreasureRevealed(true);
+        addLog("★ "+holder.toUpperCase()+" controls the treasure tile ("+newHold+"/3 cycles).","event");
+        if(newHold>=3){
+          var buff=tr.buff;
+          if(holder==="p1"){setP1KingBuff(buff);addLog("♛ P1 opens the treasure! "+buff.name+" — "+buff.desc,"buff");}
+          else{setP2KingBuff(buff);addLog("♛ P2 opens the treasure! "+buff.name+" — "+buff.desc,"buff");}
+          setActiveTreasure(null);treasureRef.current=null;
+          setTreasureHolder(null);treasureHolderRef.current=null;
+          setTreasureHoldCycles(0);treasureHoldCyclesRef.current=0;
+        }
+      } else {
+        setTreasureHolder(holder);treasureHolderRef.current=holder;
+        if(holder!==prevHolder){
+          var newHoldStart=holder?1:0;
+          setTreasureHoldCycles(newHoldStart);treasureHoldCyclesRef.current=newHoldStart;
+          if(holder)addLog("★ "+holder.toUpperCase()+" discovers the treasure tile! (1/3 cycles).","event");
+          if(holder)setTreasureRevealed(true);
+          else addLog("★ Treasure tile is uncontested — hold timer reset.","event");
+        }
+      }
+    }
     const next = cycleRef.current + 1;
     cycleRef.current = next; setCycleNum(next);
 
@@ -2042,6 +2173,18 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
 
     // Start first player's turn
     untapPlayer(firstP);
+    // Per-cycle King buffs
+    var kbCyc=firstP==="p1"?p1KingBuff:p2KingBuff;
+    if(kbCyc&&kbCyc.id==="heal2"){
+      if(firstP==="p1"){setP1Life(function(l){return Math.min(MAX_HP,l+2);});addLog("★ King buff: P1 heals 2 HP.","buff");}
+      else{setP2Life(function(l){return Math.min(MAX_HP,l+2);});addLog("★ King buff: P2 heals 2 HP.","buff");}
+    }
+    if(kbCyc&&kbCyc.id==="tilex"){
+      var tilTypes=["fire","ice","blessed","cursed"];var tt=tilTypes[Math.floor(Math.random()*tilTypes.length)];
+      var tr2=2+Math.floor(Math.random()*3);var tc2=Math.floor(Math.random()*BOARD);
+      setTileEffects(function(prev){return {...prev,[tr2+","+tc2]:{type:tt,turnsLeft:2}};});
+      addLog("★ King buff: Random "+tt+" tile placed at "+tileName(tr2,tc2)+".","event");
+    }
     const pts = Math.min(next, firstP==="p1"?p1MaxPts:p2MaxPts);
     const secondPts = Math.min(next, firstP==="p1"?p2MaxPts:p1MaxPts);
     // Apply active event instant bonus for both players
@@ -2090,6 +2233,17 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
                 else setTimeout(function(){setP2Life(function(l){var nl=Math.max(0,l-1);checkLifeWin("p2",nl,null);return nl;});addLog("♛ P2 loses 1 HP — unit lost to neutral attack!","debuff");},0);
               }
               n[atr][atc].splice(di,1);
+            }
+            // Neutral flank advance: if the neutral unit has flank capability and used L-shape, advance
+            var ndr=Math.abs(atr-fr),ndc=Math.abs(atc-fc);
+            var nIsFlank=(ndr===1&&ndc===2)||(ndr===2&&ndc===1);
+            var nHasFlank=(u.typeId===3||u.typeId===4||(u.bonusAbilities||[]).includes("flank"));
+            if(nHasFlank&&nIsFlank&&!isImmovable(u)&&n[atr][atc].length<4){
+              var nUnit=n[fr][fc].splice(i,1)[0];
+              n[atr][atc].push({...nUnit,tapped:true,moved:true});
+              i--;
+            } else {
+              n[fr][fc][i]={...u,tapped:true};
             }
             attacked=true;
             break outer;
@@ -2203,7 +2357,7 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
       setTimeout(() => {
         logs.forEach(m=>addLog(m));
         setP2Pts(pts);
-        setTimeout(() => endTurnRef.current?.(), 400);
+        setTimeout(() => endTurnRef.current&&endTurnRef.current(), 400);
       }, 0);
 
       return n;
@@ -2357,12 +2511,17 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
     ai=realAi; di=realDi;
 
     const ev = activeEventRef.current;
-    const fx = ev?.effects||{};
+    const fx = (ev&&ev.effects)||{};
 
     var attEncamp = (att.owner==="p1"&&fr===0)||(att.owner==="p2"&&fr===6)?1:0;
-    const attAtk = UNITS[att.typeId].atk + (att.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (tileEffects[`${fr},${fc}`]?.type==="blessed"?1:tileEffects[`${fr},${fc}`]?.type==="cursed"?-1:0) + attEncamp;
+    var kingAtkBonus=(att.owner==="p1"&&p1KingBuff&&p1KingBuff.id==="atk1")||(att.owner==="p2"&&p2KingBuff&&p2KingBuff.id==="atk1")?1:0;
+    var hasArcPrc=(att.owner==="p1"&&p1KingBuff&&p1KingBuff.id==="arcprc")||(att.owner==="p2"&&p2KingBuff&&p2KingBuff.id==="arcprc");
+    if(hasArcPrc&&(UNITS[att.typeId].abilities.includes("range")||(att.bonusAbilities||[]).includes("range"))){att={...att,bonusAbilities:[...(att.bonusAbilities||[]),"pierce"]};}
+    var attTile=tileEffects[fr+","+fc];
+    const attAtk = UNITS[att.typeId].atk + (att.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (attTile&&attTile.type==="blessed"?1:attTile&&attTile.type==="cursed"?-1:0) + attEncamp + kingAtkBonus;
     var defEncamp = (def.owner==="p1"&&tr===0)||(def.owner==="p2"&&tr===6)?1:0;
-    const defAtk = UNITS[def.typeId].atk + (def.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (tileEffects[`${tr},${tc}`]?.type==="blessed"?1:tileEffects[`${tr},${tc}`]?.type==="cursed"?-1:0) + defEncamp;
+    var defTile=tileEffects[tr+","+tc];
+    const defAtk = UNITS[def.typeId].atk + (def.atkBuff||0) + (fx.atkBonus||0) + (fx.atkMalus||0) + (defTile&&defTile.type==="blessed"?1:defTile&&defTile.type==="cursed"?-1:0) + defEncamp;
     const isRanged = UNITS[att.typeId].abilities.includes("range") || (att.bonusAbilities||[]).includes("range");
     const counter = isRanged || att.voidstep ? 0 : Math.max(0,defAtk);
     const dmg = Math.max(0,attAtk);
@@ -3026,6 +3185,13 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
                         </div>
                       );
                     }))}
+                    {activeTreasure&&treasureRevealed&&activeTreasure.r===r&&activeTreasure.c===c&&(function(){
+                      var playerOnTile=board[r][c].some(function(u){return (u.owner==="p1"||u.owner==="p2")&&!u.neutral;});
+                      return <div style={{position:"absolute",top:0,right:0,width:12,height:12,display:"flex",alignItems:"center",justifyContent:"center",zIndex:4,pointerEvents:"none"}}>
+                        <div style={{fontSize:11,color:"#f6e05e",fontWeight:"bold",textShadow:"0 0 6px #f6e05e"}}>★</div>
+                        {treasureHoldCycles>0&&<div style={{position:"absolute",bottom:-6,right:-2,fontSize:6,color:"#f6e05e",background:"#0a0c14",borderRadius:1,padding:"0 1px"}}>{treasureHoldCycles}/3</div>}
+                      </div>;
+                    })()}
                     {groundItems[r+","+c]&&groundItems[r+","+c].length>0&&(
                       <div onClick={function(e){e.stopPropagation();var gi=groundItems[r+","+c][0];var pu4=board[r][c].find(function(x){return x.owner===cp&&!x.neutral;});if(pu4){pickUpGroundItem(r,c,pu4.id);}else{addLog("No unit on "+tileName(r,c)+" to pick up the item.");};}}
                         style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(26,18,0,0.93)",borderTop:"1px solid #f6e05e",padding:"1px 3px",display:"flex",alignItems:"center",gap:2,cursor:"pointer",zIndex:9}}>
@@ -3044,10 +3210,10 @@ function Game({ vsMode, p1First, onMenu, chosenDeck, chosenSpellBook, onlineConn
           <div style={{display:"flex",flexDirection:"column",justifyContent:"center",gap:2,minWidth:90,flexShrink:0}}>
             {isOnline?(
               myRole==="p1"
-                ? <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ P1 {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div></>
-                : <><div style={{fontSize:18,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>♛ P2 {p2Life}<span style={{fontSize:11,color:"#fc818199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>{p2Pts}<span style={{fontSize:10,color:"#fc818199"}}> pt</span></div></>
+                ? <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ P1 {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div>{p1KingBuff&&<div title={p1KingBuff.desc} style={{fontSize:7,color:p1KingBuff.color,background:p1KingBuff.color+"18",borderRadius:2,padding:"1px 4px",border:"1px solid "+p1KingBuff.color+"44",marginTop:1,cursor:"help"}}>★ {p1KingBuff.name}</div>}</>
+                : <><div style={{fontSize:18,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>♛ P2 {p2Life}<span style={{fontSize:11,color:"#fc818199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#fc8181",lineHeight:1}}>{p2Pts}<span style={{fontSize:10,color:"#fc818199"}}> pt</span></div>{p2KingBuff&&<div title={p2KingBuff.desc} style={{fontSize:7,color:p2KingBuff.color,background:p2KingBuff.color+"18",borderRadius:2,padding:"1px 4px",border:"1px solid "+p2KingBuff.color+"44",marginTop:1,cursor:"help"}}>★ {p2KingBuff.name}</div>}</>
             ):(
-              <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div></>
+              <><div style={{fontSize:18,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>♛ {p1Life}<span style={{fontSize:11,color:"#4299e199"}}> HP</span></div><div style={{fontSize:15,fontWeight:"bold",color:"#4299e1",lineHeight:1}}>{p1Pts}<span style={{fontSize:10,color:"#4299e199"}}> pt</span></div>{p1KingBuff&&<div title={p1KingBuff.desc} style={{fontSize:7,color:p1KingBuff.color,background:p1KingBuff.color+"18",borderRadius:2,padding:"1px 4px",border:"1px solid "+p1KingBuff.color+"44",marginTop:1,cursor:"help"}}>★ {p1KingBuff.name}</div>}</>
             )}
           </div>
           <div style={{width:1,background:"#1e2535",flexShrink:0}}/>
